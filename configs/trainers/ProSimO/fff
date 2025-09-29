@@ -1,0 +1,1 @@
+python train.py --seed 0 --trainer ProSimO  --dataset-config-file configs/datasets/imagenet.yaml --config-file configs/trainers/ProSimO/vit_b16_ep10_lr_2.5e-4.yaml --lambda_value 5 --div_value 0.5 --topk 50 DATASET.NUM_SHOTS 4 DATASET.SUBSAMPLE_CLASSES all
