@@ -2,7 +2,7 @@
 
 # custom config
 
-TRAINER=ProSimO
+TRAINER=IIM
 DATA="/data/ood/"
 
 DATASET=$1
@@ -21,7 +21,7 @@ python eval_ood_detection.py \
 --dataset-config-file configs/datasets/${DATASET}.yaml \
 --in_dataset ${DATASET} \
 --config-file configs/trainers/${TRAINER}/${CFG}.yaml \
---load-epoch 20 \
+--load-epoch 30 \
 --output-dir ${Output_dir} \
 --model-dir ${MODEL_dir} \
 --top_k ${topk} \

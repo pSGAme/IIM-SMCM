@@ -1,17 +1,15 @@
 #!/bin/bash
 
+DATASET=imagenet
+CFG=vit_b16_sgd_bs32_rr0.08_ep30_lr_3.5e-4   # config file
+SHOTS=4   # number of shots (1, 2, 4, 8, 16) 4
+lambda=5 # 5
+div_value=0.1 # 0.5
+topk=50 # 50
+part=new
+num_neg=300
+CUDA_VISIBLE_DEVICES=1 sh scripts/iim/train.sh $DATASET $CFG $SHOTS $lambda $div_value $topk $part $num_neg
 
-#CUDA_VISIBLE_DEVICES=1 sh scripts/iim/train.sh imagenet vit_b16_ep50_lr_2.5e-4 4 5 0.1 50 base 300
-CUDA_VISIBLE_DEVICES=1 sh scripts/iim/train.sh imagenet vit_b16_ep20_lr_2.5e-4 4 5 0.1 50 new 300
-#
-#CUDA_VISIBLE_DEVICES=1 sh scripts/iim/train.sh imagenet vit_b16_ep50_lr_2.5e-4 8 5 0.1 50 base 300
-#CUDA_VISIBLE_DEVICES=1 sh scripts/iim/train.sh imagenet vit_b16_ep50_lr_2.5e-4 8 5 0.1 50 new 300
-#
-#CUDA_VISIBLE_DEVICES=1 sh scripts/iim/train.sh imagenet vit_b16_ep50_lr_2.5e-4 16 5 0.1 50 base 300
-#CUDA_VISIBLE_DEVICES=1 sh scripts/iim/train.sh imagenet vit_b16_ep50_lr_2.5e-4 16 5 0.1 50 new 300
-#
-#
-#
-#CUDA_VISIBLE_DEVICES=1 sh scripts/iim/train.sh imagenet100 vit_b16_ep50_lr_2.5e-4 4 5 0.1 50 all 60
-#CUDA_VISIBLE_DEVICES=1 sh scripts/iim/train.sh imagenet100 vit_b16_ep50_lr_2.5e-4 8 5 0.1 50 all 60
-#CUDA_VISIBLE_DEVICES=1 sh scripts/iim/train.sh imagenet100 vit_b16_ep50_lr_2.5e-4 16 5 0.1 50 all 60
+
+#CFG=vit_b16_adamw_bs32_rr0.08_ep50_lr_2.5e-4_biproj  # config file
+#CUDA_VISIBLE_DEVICES=1 sh scripts/iim/train.sh $DATASET $CFG $SHOTS $lambda $div_value $topk $part $num_neg

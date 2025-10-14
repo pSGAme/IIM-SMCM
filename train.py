@@ -119,6 +119,7 @@ def extend_cfg(cfg):
     cfg.TRAINER.IIM.CSC = True  # class-specific context
     cfg.TRAINER.IIM.CTX_INIT = ""  # initialization words
     cfg.TRAINER.IIM.PREC = "amp"  # fp16, fp32, amp
+    cfg.TRAINER.IIM.PROJ = False  # True, False
     cfg.TRAINER.IIM.CLASS_TOKEN_POSITION = "end"  # 'middle' or 'end' or 'front'
     cfg.DATASET.SUBSAMPLE_CLASSES = "all"  # all, base or new
 
@@ -224,8 +225,8 @@ if __name__ == "__main__":
     # augment for LOCALPROMPT
     parser.add_argument('--num_neg_prompts', type=int, default=300,
                         help='number of negative local prompts')
-    parser.add_argument('--num_pos', type=int, default=8,
-                        help='number of positive samples, 8 by default')
+    parser.add_argument('--num_pos', type=int, default=5,
+                        help='number of positive samples, 5 by default')
     parser.add_argument('--num_neg', type=int, default=1,
                         help='number of negative samples, 8 by default')
     parser.add_argument('--lambda_value', type=float, default=5,

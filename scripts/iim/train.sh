@@ -14,7 +14,7 @@ num_neg=$8
 
 for SEED in 1 2 3
 do
-    DIR=output/${DATASET}/${TRAINER}/${CFG}_${SHOTS}shots/numneg${num_neg}_topk${topk}_lamda${lambda}_div${div_value}/seed${SEED}_${part}_bs32
+    DIR=output/${DATASET}/${TRAINER}/${CFG}_${SHOTS}shots/numneg${num_neg}_topk${topk}_lamda${lambda}_div${div_value}/seed${SEED}_${part}
 #    if [ -d "$DIR" ]; then
 #        echo "Oops! The results exist at ${DIR} (so skip this job)"
 #    else

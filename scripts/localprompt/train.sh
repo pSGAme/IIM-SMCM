@@ -11,7 +11,7 @@ div_value=$5 # 0.5
 topk=$6 # 50
 part=$7
 
-for SEED in  1 2 3
+for SEED in  1
 do
     DIR=output/${DATASET}/${TRAINER}/${CFG}_${SHOTS}shots/topk${topk}/seed${SEED}_${part}_bs32_epoch50
 #    if [ -d "$DIR" ]; then

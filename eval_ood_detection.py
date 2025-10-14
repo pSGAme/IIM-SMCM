@@ -107,6 +107,7 @@ def extend_cfg(cfg):
     cfg.TRAINER.IIM.CSC = True  # class-specific context
     cfg.TRAINER.IIM.CTX_INIT = ""  # initialization words
     cfg.TRAINER.IIM.PREC = "amp"  # fp16, fp32, amp
+    cfg.TRAINER.IIM.PROJ = False
     cfg.TRAINER.IIM.CLASS_TOKEN_POSITION = "end"  # 'middle' or 'end' or 'front'
     cfg.DATASET.SUBSAMPLE_CLASSES = "all"  # all, base or new
 
@@ -220,8 +221,7 @@ def main(args):
             print(score_names[i])
             get_and_print_results(args, in_scores[i], out_scores[i],
                                   auroc_list[i], aupr_list[i], fpr_list[i])
-            plot_distribution(args, in_scores[i], out_scores[i], out_dataset, score=score_names[i])
-            # plot_distribution(args, in_score_localprompt, out_score_localprompt, "imagenet", score='Local-Prompt')
+            # plot_distribution(args, in_scores[i], out_scores[i], out_dataset, score=score_names[i])
 
     for i in range(num_score):
         print("{} avg. FPR:{}, AUROC:{}, AUPR:{}".format(score_names[i], np.mean(fpr_list[i]), np.mean(auroc_list[i]), np.mean(aupr_list[i])))

@@ -3,13 +3,14 @@
 topk=50
 dataset="imagenet"
 part="new"
-config="vit_b16_ep10_lr_2.5e-4"
+config="TEST"
 shot=4
-modeldir="output/${dataset}/ProSimO/${config}_${shot}shots/numneg300_topk50_lamda5_div0.5/"
 num_neg=300
+
+model_dir="output/${dataset}/ProSimO/${config}_${shot}shots/numneg${num_neg}_topk${topk}_lamda5_div0.5"
 alpha=0.9
 
-for seed in 1
+for seed in  2 3
 do
-  CUDA_VISIBLE_DEVICES=0 sh scripts/prosimo/eval.sh ${dataset}  ${config} ${topk} ${part} ${modeldir}/seed${seed}_${part}_bs32 ${num_neg} ${alpha}
+  CUDA_VISIBLE_DEVICES=0 sh scripts/prosimo/eval.sh ${dataset}  ${config} ${topk} ${part} ${model_dir}/seed${seed}_${part}_bs32 ${num_neg} ${alpha}
 done
