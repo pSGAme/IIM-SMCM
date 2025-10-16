@@ -1,22 +1,8 @@
 import copy
-import os.path as osp
 
-import torch
-import torch.nn as nn
-from torch.nn import functional as F
-from torch.cuda.amp import GradScaler, autocast
-
-from dassl.engine import TRAINER_REGISTRY, TrainerX
-from dassl.utils import load_pretrained_weights, load_checkpoint
-from dassl.optim import build_optimizer, build_lr_scheduler
 
 import clip_w_local
-from clip_w_local import clip
 from clip_w_local.simple_tokenizer import SimpleTokenizer as _Tokenizer
-import numpy as np
-from tqdm import tqdm
-from PIL import Image
-from einops import repeat
 import math
 from functools import reduce
 from operator import mul
@@ -60,9 +46,7 @@ class TextEncoder(nn.Module):
         x = x.permute(1, 0, 2)  # NLD -> LND
         x, _, _, _ = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
-        x = self.ln_final(x).type(self.dtype)
-        # x.shape = [batch_size, n_ctx, transformer.width]
-        # take features from the eot embedding (eot_token is the highest number in each sequence)
+        x = self.ln_final(x).type(self.dtype) # x.shape = [batch_size, n_ctx, transformer.width]
         x = x[torch.arange(x.shape[0]), tokenized_prompts.argmax(dim=-1)] @ self.text_projection
 
         return x
@@ -87,30 +71,16 @@ class PromptLearner(nn.Module):
             # use given words to initialize context vectors
             ctx_init = ctx_init.replace("_", " ")
             n_ctx = len(ctx_init.split(" "))
-            prompt = clip.tokenize(ctx_init)
-            with torch.no_grad():
-                embedding = clip_model.token_embedding(prompt).type(dtype)
-            global_ctx_vectors = embedding[0, 1: 1 + n_ctx, :]
-            prompt_prefix = ctx_init
-
         else:
             # random initialization
             if cfg.TRAINER.ProSimO.CSC:
-                print("Initializing class-specific contexts")
                 global_ctx_vectors = torch.empty(n_cls, n_ctx, ctx_dim, dtype=dtype)
             else:
-                print("Initializing a generic context")
                 global_ctx_vectors = torch.empty(n_ctx, ctx_dim, dtype=dtype)
             nn.init.normal_(global_ctx_vectors, std=0.02)
-            prompt_prefix = " ".join(["X"] * n_ctx)
-
-        print(f'Initial global prompt context: "{prompt_prefix}"')
-        print(f"Number of context words (tokens): {n_ctx}")
-
+        print(f'Initial global prompt context: a photo of a [CLASS].')
         classnames = [name.replace("_", " ") for name in classnames]
-        name_lens = [len(_tokenizer.encode(name)) for name in classnames]
         global_prompts = ["a photo of a" + " " + name + "." for name in classnames]
-
         global_tokenized_prompts = torch.cat([clip.tokenize(p).cuda() for p in global_prompts])
         with torch.no_grad():
             embedding = clip_model.token_embedding(global_tokenized_prompts).type(dtype)
@@ -129,7 +99,6 @@ class PromptLearner(nn.Module):
                 embedding = clip_model.token_embedding(prompt).type(dtype)
             local_ctx_vectors = embedding[0, 1: 1 + n_ctx, :]
             prompt_prefix = ctx_init
-
         else:
             # random initialization
             if cfg.TRAINER.ProSimO.CSC:
@@ -149,9 +118,6 @@ class PromptLearner(nn.Module):
         with torch.no_grad():
             embedding = clip_model.token_embedding(local_tokenized_prompts).type(dtype)
 
-        # These token vectors will be saved when in save_model(),
-        # but they should be ignored in load_model() as we want to use
-        # those computed using the current class names
         self.register_buffer("token_prefix", embedding[:, :1, :])  # SOS
         self.register_buffer("token_suffix", embedding[:, 1 + n_ctx:, :])  # CLS, EOS
 
@@ -174,16 +140,12 @@ class PromptLearner(nn.Module):
         with torch.no_grad():
             embedding = clip_model.token_embedding(neg_tokenized_prompts).type(dtype)
 
-        # These token vectors will be saved when in save_model(),
-        # but they should be ignored in load_model() as we want to use
-        # those computed using the current class names
-
         self.register_buffer("neg_token_prefix", embedding[:, :1, :])  # SOS
         self.register_buffer("neg_token_suffix", embedding[:, 1 + n_ctx:, :])  # CLS, EOS
 
         self.neg_tokenized_prompts = neg_tokenized_prompts
 
-        ## newly appended by ckx
+        # TODO, currently, it is useless below
         self.v_ctx = cfg.TRAINER.ProSimO.V_CTX
         self.visual_ctx = None
         self.visual_ctx_neg = None
@@ -216,9 +178,6 @@ class PromptLearner(nn.Module):
             dim=1,
         )
 
-        if local_ctx.dim() == 2:
-            local_ctx = local_ctx.unsqueeze(0).expand(self.num_neg_prompts, -1, -1)
-
         neg_prefix = self.neg_token_prefix  # 100,1,512
         neg_suffix = self.neg_token_suffix  # 1000,60,512
 
@@ -231,7 +190,7 @@ class PromptLearner(nn.Module):
             dim=1,
         )
 
-        return self.visual_ctx, self.visual_ctx_neg, self.global_embedding, local_prompts, neg_prompts
+        return self.global_embedding, local_prompts, neg_prompts
 
 
 class CustomCLIP(nn.Module):
@@ -262,7 +221,7 @@ class CustomCLIP(nn.Module):
                 image_features.append(image_feature)
                 local_image_features.append(local_image_feature)
 
-            visual_prompts, _, global_prompts, _, _ = self.prompt_learner()
+            global_prompts, _, _ = self.prompt_learner()
             global_tokenized_prompts = self.global_tokenized_prompts
             global_text_features = self.text_encoder(global_prompts, global_tokenized_prompts)
             global_text_features = global_text_features / global_text_features.norm(dim=-1, keepdim=True)
@@ -282,74 +241,60 @@ class CustomCLIP(nn.Module):
 
             return similarity_list, image_features, local_image_features
 
+    def div_loss(self, text_features):
+        num = text_features.shape[0]
+        loss_div = torch.nn.functional.cosine_similarity(text_features[None, :, :],  # 1 300 512 ; 300, 1, 512
+                                                         text_features[:, None, :], dim=-1)
+        loss_div = torch.sum(loss_div, dim=-1) / num
+        loss_div = torch.sum(loss_div, dim=-1) / (num - 1)
+        return loss_div
+
     def forward(self, images, local_image_features=None, max_list=None):
+
+        logit_scale = self.logit_scale.exp()
+
+        global_prompts, local_prompts, neg_prompts = self.prompt_learner()
+
+        global_tokenized_prompts = self.global_tokenized_prompts
+        local_tokenized_prompts = self.local_tokenized_prompts
+        neg_tokenized_prompts = self.neg_tokenized_prompts
+
+        local_text_features = self.text_encoder(local_prompts, local_tokenized_prompts)
+        neg_text_features = self.text_encoder(neg_prompts, neg_tokenized_prompts)
+
+        local_text_features = local_text_features / local_text_features.norm(dim=-1, keepdim=True)
+        neg_text_features = neg_text_features / neg_text_features.norm(dim=-1, keepdim=True)
+
         if self.training:
             num_region, dimension = local_image_features.shape[-2:]
 
-            visual_prompts, neg_visual_prompts, _, local_prompts, neg_prompts = self.prompt_learner()
-
-            local_tokenized_prompts = self.local_tokenized_prompts
-            neg_tokenized_prompts = self.neg_tokenized_prompts
-
-            local_text_features = self.text_encoder(local_prompts, local_tokenized_prompts)
-            neg_text_features = self.text_encoder(neg_prompts, neg_tokenized_prompts)
-
             # print(max_list.shape) # 1, bs
-            with torch.no_grad():
-                pos_local_image_features = local_image_features.gather(0,
+            with torch.no_grad():  # [num_pos, batch, len, channel]
+                local_image_features = local_image_features.gather(0,
                                                                        repeat(max_list, 'q b -> q b n c', n=num_region,
                                                                               c=dimension)).squeeze()
-
-            pos_local_image_features = pos_local_image_features / pos_local_image_features.norm(dim=-1, keepdim=True)
-            neg_local_image_features = pos_local_image_features
-
-            local_text_features = local_text_features / local_text_features.norm(dim=-1, keepdim=True)
-            neg_text_features = neg_text_features / neg_text_features.norm(dim=-1, keepdim=True)
-
-            logit_scale = self.logit_scale.exp()
-            logits_local = logit_scale * pos_local_image_features @ local_text_features.t()
-            p2n_logits_local = logit_scale * neg_local_image_features @ local_text_features.t()
-            n2p_logits_local = logit_scale * pos_local_image_features @ neg_text_features.t()
-            neg_logits_local = logit_scale * neg_local_image_features @ neg_text_features.t()
-
-            # for diversity regularization
-            loss_div = torch.nn.functional.cosine_similarity(neg_text_features[None, :, :],  # 300 512
-                                                             neg_text_features[:, None, :], dim=-1)
-
-            loss_div = torch.sum(loss_div, dim=-1) / self.prompt_learner.num_neg_prompts
-            loss_div = torch.sum(loss_div, dim=-1) / (self.prompt_learner.num_neg_prompts - 1)
-
-            loss_div_local = torch.nn.functional.cosine_similarity(local_text_features[None, :, :],
-                                                             local_text_features[:, None, :], dim=-1)
-
-            loss_div_local = torch.sum(loss_div_local, dim=-1) / self.prompt_learner.num_local_prompts
-            loss_div_local = torch.sum(loss_div_local, dim=-1) / (self.prompt_learner.num_local_prompts - 1)
-
-            loss_div = loss_div_local + loss_div
-            return logits_local, p2n_logits_local, n2p_logits_local, neg_logits_local, loss_div
-
-        else:  # for inference
-            visual_prompts, neg_visual_prompts, global_prompts, local_prompts, neg_prompts = self.prompt_learner()
-
-            global_tokenized_prompts = self.global_tokenized_prompts
-            local_tokenized_prompts = self.local_tokenized_prompts
-            neg_tokenized_prompts = self.neg_tokenized_prompts
-
-            global_text_features = self.zs_text_encoder(global_prompts, global_tokenized_prompts)
-            local_text_features = self.text_encoder(local_prompts, local_tokenized_prompts)
-            neg_text_features = self.text_encoder(neg_prompts, neg_tokenized_prompts)
-
-            image_features, _ = self.zs_clip_model.visual(images.type(self.dtype))
-            _, local_image_features = self.image_encoder(images.type(self.dtype))
-
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
             local_image_features = local_image_features / local_image_features.norm(dim=-1, keepdim=True)
 
-            global_text_features = global_text_features / global_text_features.norm(dim=-1, keepdim=True)
-            local_text_features = local_text_features / local_text_features.norm(dim=-1, keepdim=True)
-            neg_text_features = neg_text_features / neg_text_features.norm(dim=-1, keepdim=True)
+            logits_local = logit_scale * local_image_features @ local_text_features.t()
+            neg_logits_local = logit_scale * local_image_features @ neg_text_features.t()
 
-            logit_scale = self.logit_scale.exp()
+            # for diversity regularization
+            loss_div = self.div_loss(neg_text_features)
+            loss_div_local = self.div_loss(local_text_features)
+            loss_div = loss_div_local + loss_div
+
+            return logits_local, neg_logits_local, loss_div
+
+        else:  # for inference
+            global_text_features = self.zs_text_encoder(global_prompts, global_tokenized_prompts)
+            global_text_features = global_text_features / global_text_features.norm(dim=-1, keepdim=True)
+
+            image_features, _ = self.zs_clip_model.visual(images.type(self.dtype))
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+
+            _, local_image_features = self.image_encoder(images.type(self.dtype))
+            local_image_features = local_image_features / local_image_features.norm(dim=-1, keepdim=True)
+
             logits = logit_scale * image_features @ global_text_features.t()
             logits_local = logit_scale * local_image_features @ local_text_features.t()
             neg_logits_local = logit_scale * local_image_features @ neg_text_features.t()
@@ -375,21 +320,16 @@ class ProSimO(TrainerX):
         print(f"Loading CLIP (backbone: {cfg.MODEL.BACKBONE.NAME})")
         clip_model = load_clip_to_cpu(cfg)
         if cfg.TRAINER.ProSimO.PREC == "fp32" or cfg.TRAINER.ProSimO.PREC == "amp":
-            # CLIP's default precision is fp16
+            # CLIP's default precision is fp16 :)
             clip_model.float()
         print("Building custom CLIP")
         self.model = CustomCLIP(cfg, classnames, clip_model)
 
         print("Turning off gradients in both the image and the text encoder")
-        train_parameters = []
-        train_parameters.append('text_encoder.text_projection')
-        train_parameters.append('image_encoder.proj')
-        train_parameters.append('prompt_learner')
+        train_parameters = ['text_encoder.text_projection', 'prompt_learner']
 
         flag = 0
         for name, param in self.model.named_parameters():
-            # if "prompt_learner" not in name and name not in train_parameters:
-            #     param.requires_grad_(False)
             for str in train_parameters:
                 flag = 0
                 if name.startswith(str):
@@ -445,16 +385,15 @@ class ProSimO(TrainerX):
 
         label_output_local = output_local.gather(2, repeat(label, 'b -> b n 1', n=output_local.shape[1]))
         # bs, 196, 1
-
         label_topk_output_local_pos = label_output_local.topk(k=self.top_k * 2, dim=1)[1]
         label_topk_output_local_pos = label_topk_output_local_pos[:, self.top_k:2 * self.top_k]
         # bs, k, 1 # indices
-
         neg_topk_output_local = neg_output_local.gather(1, repeat(label_topk_output_local_pos, 'b k 1 -> b k n',
                                                                   n=self.model.prompt_learner.num_neg_prompts))
-        # neg_topk_output_local = output_local.gather(1, repeat(label_topk_output_local_pos, 'b k 1 -> b k n',
+        # pos_topk_output_local = output_local.gather(1, repeat(label_topk_output_local_pos, 'b k 1 -> b k n',
         #                                                       n=self.model.prompt_learner.num_local_prompts))  # b, k, 500
-
+        # as for the pos_topk_output_label, the above strictly follows our paper,
+        # in practice, we find that the below one is better.
         pos_topk_output_local = output_local.topk(k=self.top_k * 2, dim=1)[0]
         pos_topk_output_local = pos_topk_output_local[:, self.top_k: self.top_k * 2]
 
@@ -478,23 +417,17 @@ class ProSimO(TrainerX):
         self.div_value = self.cfg.div_value
 
         if prec == "amp":
-
             similarity_list, _, local_image_features = self.model.multi_loader_select(image, label)
-            max_list = torch.topk(similarity_list, k=num_pos, dim=0)[1]
-            # print(max_list.shape, min_list.shape)
-            # 8 bs, 8 bs
+            max_list = torch.topk(similarity_list, k=num_pos, dim=0)[1]  # num_pos bs
             for i in range(num_pos):
                 with autocast():
-                    output_local, p2n_output_local, n2p_output_local, neg_output_local, loss_div = \
+                    output_local, neg_output_local, loss_div = \
                         self.model(_, local_image_features, max_list[i:i + 1, :])
-
-                    # loss_local = self.calculate_loss_local(output_local, n2p_output_local, label)
-                    # loss_local_negative = self.calculate_loss_local_neg(neg_output_local, p2n_output_local, label)
 
                     loss_local = self.calculate_loss_local(output_local, neg_output_local, label)
                     loss_local_negative = self.calculate_loss_local_neg(neg_output_local, output_local, label)
-
                     loss = loss_local + self.lambda_value * loss_local_negative + self.div_value * loss_div
+
                 self.optim.zero_grad()
                 self.scaler.scale(loss).backward()
                 self.scaler.step(self.optim)
@@ -515,14 +448,14 @@ class ProSimO(TrainerX):
         return loss_summary
 
     def parse_batch_train(self, total_batch):
-        num = 1
-        # get number of random_crop
+        inputs = []
+        num_crop = 1
         for key in total_batch.keys():
             if 'img' in key:
-                num = max(num, int(key[3:])) if num else 1
+                num_crop = max(num_crop, int(key[3:])) if num_crop else 1
+        num = self.cfg.num_pos
+        assert num <= num_crop
 
-        inputs = []
-        num = self.cfg.num_pos  # be aware to delete it
         for i in range(num):
             inputs.append(total_batch["img" + str(i + 1)].to(self.device))
         label = total_batch["label"].to(self.device)
@@ -560,9 +493,7 @@ class ProSimO(TrainerX):
                 del state_dict["token_suffix"]
 
             print('Successfully load global weights from pretrained model.')
-
             print("Loading weights to {} " 'from "{}" (epoch = {})'.format(name, model_path, epoch))
-            # set strict=False
             self._models[name].load_state_dict(state_dict, strict=False)
 
     @torch.no_grad()
@@ -587,7 +518,6 @@ class ProSimO(TrainerX):
         for batch_idx, batch in enumerate(tqdm(data_loader)):
             input, label = self.parse_batch_test(batch)
             output_global, output_local, _, = self.model_inference(input)
-
 
             output_global /= 100.0
             output_local /= 100.0

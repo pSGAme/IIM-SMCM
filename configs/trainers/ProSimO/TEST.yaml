@@ -33,6 +33,5 @@ MODEL:
 TRAINER:
   ProSimO:
     N_CTX: 16
-    V_CTX: 8
     CSC: True
     CLASS_TOKEN_POSITION: end

@@ -123,14 +123,6 @@ def extend_cfg(cfg):
     cfg.TRAINER.IIM.CLASS_TOKEN_POSITION = "end"  # 'middle' or 'end' or 'front'
     cfg.DATASET.SUBSAMPLE_CLASSES = "all"  # all, base or new
 
-    cfg.TRAINER.ProSimOHyper = CN()
-    cfg.TRAINER.ProSimOHyper.N_CTX = 16  # number of context vectors
-    cfg.TRAINER.ProSimOHyper.V_CTX = 8  # number of visual prompts
-    cfg.TRAINER.ProSimOHyper.CSC = True  # class-specific context
-    cfg.TRAINER.ProSimOHyper.CTX_INIT = ""  # initialization words
-    cfg.TRAINER.ProSimOHyper.PREC = "amp"  # fp16, fp32, amp
-    cfg.TRAINER.ProSimOHyper.CLASS_TOKEN_POSITION = "end"  # 'middle' or 'end' or 'front'
-    cfg.DATASET.SUBSAMPLE_CLASSES = "all"  # all, base or new
 
 
 def setup_cfg(args):
@@ -169,8 +161,6 @@ def main(args):
     print_args(args, cfg)
     print("Collecting env info ...")
     print("** System info **\n{}\n".format(collect_env_info()))
-
-
 
     trainer = build_trainer(cfg)
 
