@@ -30,6 +30,10 @@ def R_MCM_Score(output, output_local, T, topk=1, neg_output_local=None):
     mcm_score = MCM_Score(output, T)
     N, C = output_local.shape[1:]
     if neg_output_local is not None:
+        output_local = torch.exp(output_local / T)
+        neg_output_local = torch.exp(neg_output_local / T)
+
+        # print(torch.mean(output_local), torch.mean(neg_output_local))
         smax_local = torch.topk((torch.exp(output_local / T) /
                                  torch.sum(torch.exp(torch.cat((output_local, neg_output_local), dim=-1) / T), dim=-1,
                                            keepdim=True)).reshape(-1, N * C), k=topk, dim=-1)[0]

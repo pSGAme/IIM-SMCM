@@ -148,6 +148,7 @@ class PromptLearner(nn.Module):
 
         self.neg_tokenized_prompts = neg_tokenized_prompts
 
+
     def forward(self):
         assert self.class_token_position == 'end', 'not expected class token position.'
 
@@ -199,6 +200,14 @@ class CustomCLIP(nn.Module):
         self.zs_clip_model = copy.deepcopy(clip_model)
         self.zs_text_encoder = TextEncoder(self.zs_clip_model)
 
+    def div_loss(self, text_features):
+        num = text_features.shape[0]
+        loss_div = torch.nn.functional.cosine_similarity(text_features[None, :, :],  # 1 300 512 ; 300, 1, 512
+                                                         text_features[:, None, :], dim=-1)
+        loss_div = torch.sum(loss_div, dim=-1) / num
+        loss_div = torch.sum(loss_div, dim=-1) / (num - 1)
+        return loss_div
+
     def forward(self, images):
         if self.training:
 
@@ -218,12 +227,10 @@ class CustomCLIP(nn.Module):
             logits_local = logit_scale * local_image_features @ local_text_features.t()
             neg_logits_local = logit_scale * local_image_features @ neg_text_features.t()
 
-            # for diversity regularization
-            loss_div = torch.nn.functional.cosine_similarity(neg_text_features[None, :, :],  # [1, B, L, C]
-                                                             neg_text_features[:, None, :], dim=-1)  # [ B, 1, L, C]
             # B, B, L
-            loss_div = torch.sum(loss_div, dim=-1) / self.prompt_learner.num_neg_prompts
-            loss_div = torch.sum(loss_div, dim=-1) / (self.prompt_learner.num_neg_prompts - 1)
+            loss_div = self.div_loss(neg_text_features)
+            loss_div_local = self.div_loss(local_text_features)
+            loss_div = loss_div_local + loss_div
 
             return logits_local, neg_logits_local, loss_div
 
@@ -255,7 +262,6 @@ class CustomCLIP(nn.Module):
 
             logits = logit_scale * image_features @ global_text_features.t()
             logits_local = logit_scale * local_image_features @ local_text_features.t()
-
             neg_logits_local = logit_scale * local_image_features @ neg_text_features.t()
 
             return logits, logits_local, neg_logits_local
@@ -295,11 +301,6 @@ class IIM(TrainerX):
         for name, param in self.model.named_parameters():
             for str in train_parameters:
                 flag = 0
-                # if "text" in name and ("ln" in name or "ln_final" in name or "ln_post" in name):
-                #     print("LayerNorm: " + name)  # 36246528
-                #     param.requires_grad_(True)
-                #     flag = 1
-                #     break
                 if name.startswith(str):
                     param.requires_grad_(True)
                     flag = 1
@@ -328,90 +329,61 @@ class IIM(TrainerX):
             print(f"Multiple GPUs detected (n_gpus={device_count}), use all of them!")
             self.model = nn.DataParallel(self.model)
 
+
     def calculate_loss_local(self, output_local, neg_output_local, label):
 
         total_local_prompts = self.model.prompt_learner.num_local_prompts + self.model.prompt_learner.num_neg_prompts
-        # batch,n,c ->  batch,n,1 -> batch,k,1 -> batch,k
-        label_output_local = output_local.gather(2, repeat(label, 'b -> b n 1', n=output_local.shape[1]))  # batch,n,1
-        label_topk_output_local_pos = label_output_local.topk(k=self.top_k, dim=1)[1]  # batch,k,1  --> index
-        label_topk_output_local = label_output_local.gather(1, label_topk_output_local_pos).squeeze()  # batch, k
+        label_output_local = output_local.gather(2, repeat(label, 'b -> b n 1', n=output_local.shape[1]))  # batch,196,1
 
-        pos_topk_ouput_local = output_local.topk(k=self.top_k, dim=1)[0]  # batch, k, c
-        neg_topk_output_local = neg_output_local.topk(k=self.top_k, dim=1)[0]  # batch, k, c_neg
+        label_topk_output_local = label_output_local.topk(k=self.top_k, dim=1)[0].squeeze()  # batch, k
+        pos_topk_ouput_local = output_local.topk(k=self.top_k, dim=1)[0]  # batch, k, 500
+        neg_topk_output_local = neg_output_local.topk(k=self.top_k, dim=1)[0]  # batch, k, 300
 
-        # To prevent overflow. for simplicity, divide both the numerator and denominator by the first number
-        if len(label_topk_output_local.shape) == 1:  # avoid the case k=1
+        if len(label_topk_output_local.shape) == 1:  # avoid the case k=1, if bs = 1, then unsqueeze(0) :)
             label_topk_output_local = label_topk_output_local.unsqueeze(1)
 
-        # common_factor = label_topk_output_local[:, 0] # batch
-       #  print(pos_topk_ouput_local.shape, neg_topk_output_local.shape, label_topk_output_local.shape)
-        t = torch.cat((pos_topk_ouput_local, neg_topk_output_local, label_topk_output_local.unsqueeze(2)),
-                      dim=-1)
+        # To prevent overflow. for simplicity, divide both the numerator and denominator by the first number
+        common_factor = label_topk_output_local[:, 0]  # batch
 
-        common_factor = torch.amax(t, dim=[1, 2])  # b
-        # print(common_factor.shape)
-        label_topk_output_local[:, 0:1].expand_as(label_topk_output_local)
+        Pos = label_topk_output_local - repeat(common_factor, 'b-> b k', k=self.top_k)
 
-        local_contrastive = torch.sum(
-            torch.exp((label_topk_output_local - repeat(common_factor, 'b-> b k', k=self.top_k)) / self.T), dim=-1) / \
-                            torch.sum(torch.exp((torch.cat((pos_topk_ouput_local, neg_topk_output_local),
-                                                           dim=-1).reshape(-1,
-                                                                           self.top_k * total_local_prompts) - repeat(
-                                common_factor, 'b-> b k', k=self.top_k * total_local_prompts)) / self.T), dim=-1)
+        Neg = torch.cat((pos_topk_ouput_local, neg_topk_output_local), dim=-1)  # batch, k, 800
+        Neg = Neg.reshape(-1, self.top_k * total_local_prompts)
+        Neg = Neg - repeat(common_factor, 'b-> b k', k=self.top_k * total_local_prompts)
 
+        local_contrastive = torch.sum(torch.exp(Pos / self.T), dim=-1) / torch.sum(torch.exp(Neg / self.T), dim=-1)
         loss_local = -torch.mean(torch.log(local_contrastive))
+
         return loss_local
 
-    def calculate_loss_local_neg(self, output_local, p2n_output_local, label):
-        #
-        # loss_local_negative = self.calculate_loss_local_neg(neg_output_local, output_local, label)
-        '''
-        output_local is now local_negative_prompts, so the topk positional should be determined by p2n_output_local
-        '''
-
-        # print(output_local.shape, p2n_output_local.shape, len(label))
-        # 4, 196, 300; 4, 196, 500; 5
+    def calculate_loss_local_neg(self, neg_output_local, output_local, label):
+        # bs, 196, 300; bs, 196, 500;
         total_local_prompts = self.model.prompt_learner.num_local_prompts + self.model.prompt_learner.num_neg_prompts
+        num_neg_prompts = self.model.prompt_learner.num_neg_prompts
 
-        label_output_local = p2n_output_local.gather(2, repeat(label, 'b -> b n 1', n=output_local.shape[1]))  # b, n, 1
-        label_topk_output_local_pos = label_output_local.topk(k=self.top_k * 2, dim=1)[1]  # b, 2k, 1
-        label_topk_output_local_pos = label_topk_output_local_pos[:, self.top_k:2 * self.top_k]  # b, k, 1
+        label_output_local = output_local.gather(2, repeat(label, 'b -> b n 1', n=output_local.shape[1]))
+        # bs, 196, 1
+        label_topk_output_local_pos = label_output_local.topk(k=self.top_k * 2, dim=1)[1]
+        label_topk_output_local_pos = label_topk_output_local_pos[:, self.top_k:2 * self.top_k]
+        # bs, k, 1 # indices
+        neg_topk_output_local = neg_output_local.gather(1, repeat(label_topk_output_local_pos, 'b k 1 -> b k n',
+                                                                  n=self.model.prompt_learner.num_neg_prompts))
+        # pos_topk_output_local = output_local.gather(1, repeat(label_topk_output_local_pos, 'b k 1 -> b k n',
+        #                                                       n=self.model.prompt_learner.num_local_prompts))  # b, k, 500
+        # as for the pos_topk_output_label, the above strictly follows our paper,
+        # in practice, we find that the below one is better.
+        pos_topk_output_local = output_local.topk(k=self.top_k * 2, dim=1)[0]
+        pos_topk_output_local = pos_topk_output_local[:, self.top_k: self.top_k * 2]
 
-        # 4, 50, 1
-        pos_topk_ouput_local = output_local.gather(1, repeat(label_topk_output_local_pos, 'b k 1 -> b k n',
-                                                             n=self.model.prompt_learner.num_neg_prompts))  # b, k, 300
+        t = torch.cat((pos_topk_output_local, neg_topk_output_local), dim=-1)
+        common_factor = torch.amax(t, dim=[1, 2], keepdim=True)  # b, k, 1
 
-        neg_topk_output_local = p2n_output_local.gather(1, repeat(label_topk_output_local_pos, 'b k 1 -> b k n',
-                                                             n=self.model.prompt_learner.num_local_prompts))  # b, k, 500
+        Neg = neg_topk_output_local - repeat(common_factor, 'b 1 1 -> b k n', k=self.top_k, n=num_neg_prompts)
+        Pos = torch.cat((neg_topk_output_local, pos_topk_output_local), dim=-1)
+        Pos = Pos - repeat(common_factor, 'b 1 1 -> b k n ', k=self.top_k, n=total_local_prompts)
 
-        # neg_topk_output_local = p2n_output_local.topk(k=self.top_k * 2, dim=1)[0]  # b, 2k, 500
-        # neg_topk_output_local = neg_topk_output_local[:, self.top_k:2 * self.top_k]  # b, k, 500
-        # print(neg_topk_output_local.shape)
-        # 4, 50, 500
-
-        # To prevent overflow. for simplicity, divide both the numerator and denominator by the first number
-        t = torch.cat((pos_topk_ouput_local, neg_topk_output_local),
-                      dim=-1)
-
-        common_factor = torch.amax(t, dim=[1, 2], keepdim=True)  # b, 1, 1
-        # print(common_factor.shape)
-
-        local_contrastive = torch.sum(torch.exp((pos_topk_ouput_local - repeat(common_factor, 'b 1 1 -> b k n',
-                                                                               k=self.top_k,
-                                                                               n=self.model.prompt_learner.num_neg_prompts)) / self.T),
-                                      dim=(1, 2)) / \
-                            torch.sum(torch.exp((torch.cat((pos_topk_ouput_local, neg_topk_output_local),
-                                                           dim=-1) - repeat(common_factor, 'b 1 1 -> b k n ',
-                                                                            k=self.top_k,
-                                                                            n=total_local_prompts)) / self.T),
-                                      dim=(1, 2))
-
-        local_contrastive = torch.log(local_contrastive)
-        nan_mask = local_contrastive.isfinite()
-        if nan_mask.any():
-            loss_local_neg = -torch.mean(local_contrastive[nan_mask])
-        else:
-            return None
+        loss_local_neg = torch.sum(torch.exp(Neg / self.T), dim=(1, 2)) / torch.sum(torch.exp(Pos / self.T), dim=(1, 2))
+        loss_local_neg = -torch.mean(torch.log(loss_local_neg))
 
         return loss_local_neg
 
@@ -425,8 +397,8 @@ class IIM(TrainerX):
                 output_local, neg_output_local, loss_div = self.model(image)
                 loss_local = self.calculate_loss_local(output_local, neg_output_local, label)
                 loss_local_negative = self.calculate_loss_local_neg(neg_output_local, output_local, label)
-
                 loss = loss_local + self.lambda_value * loss_local_negative + self.div_value * loss_div
+
             self.optim.zero_grad()
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optim)
@@ -511,6 +483,7 @@ class IIM(TrainerX):
         outputs = []
         for batch_idx, batch in enumerate(tqdm(data_loader)):
             input, label = self.parse_batch_test(batch)
+
             output_global, output_local, _ = self.model_inference(input)
 
             output_global /= 100.0
@@ -584,7 +557,9 @@ class IIM(TrainerX):
             # slcm
             alpha = self.cfg.alpha
             lamda = alpha * 196 / (
-                        self.model.prompt_learner.num_local_prompts + self.model.prompt_learner.num_neg_prompts / 3)
+                        self.model.prompt_learner.num_local_prompts)
+            #
+            # + self.model.prompt_learner.num_neg_prompts
             # lamda = 1.0
             slcm_local_score = SLCM_Score(output, output_local, T, lamda, topk=top_k)
             slcm_score.append(slcm_local_score)
@@ -620,7 +595,7 @@ class IIM(TrainerX):
 
         for batch_idx, batch in enumerate(tqdm(data_loader)):
             images, labels = self.parse_batch_test(batch)
-
+            # print(batch_idx)
             output, output_local, neg_output_local = self.model_inference(images)
             output /= 100.0
             output_local /= 100.0
@@ -645,7 +620,7 @@ class IIM(TrainerX):
             # slcm
             alpha = self.cfg.alpha
             lamda = alpha * 196 / (
-                        self.model.prompt_learner.num_local_prompts + self.model.prompt_learner.num_neg_prompts / 3)
+                        self.model.prompt_learner.num_local_prompts)
             # lamda = 1.0
             slcm_local_score = SLCM_Score(output, output_local, T, lamda, topk=top_k)
             slcm_score.append(slcm_local_score)

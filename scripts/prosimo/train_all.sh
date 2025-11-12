@@ -3,7 +3,9 @@ TRAINER=ProSimO
 
 config_file="TEST"
 top_k=50
-CUDA_VISIBLE_DEVICES=1 sh scripts/prosimo/train.sh imagenet ${config_file} 16 5 0.5 ${top_k} new 300
+
+CUDA_VISIBLE_DEVICES=1 sh scripts/prosimo/train.sh imagenet ${config_file} 4 5 0.5 ${top_k} base 300
+CUDA_VISIBLE_DEVICES=1 sh scripts/prosimo/train.sh imagenet ${config_file} 16 5 0.5 ${top_k} base 300
 
 
 

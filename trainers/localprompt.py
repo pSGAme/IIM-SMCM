@@ -17,11 +17,13 @@ from PIL import Image
 from einops import repeat
 from .utils.score_function import *
 
-import os 
+import os
+
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 _tokenizer = _Tokenizer()
 softmax = nn.Softmax(dim=1).cuda()
+
 
 def load_clip_to_cpu(cfg):
     backbone_name = cfg.MODEL.BACKBONE.NAME
@@ -61,6 +63,7 @@ class TextEncoder(nn.Module):
 
         return x
 
+
 class PromptLearner(nn.Module):
     def __init__(self, cfg, classnames, clip_model):
         super().__init__()
@@ -74,7 +77,7 @@ class PromptLearner(nn.Module):
         clip_imsize = clip_model.visual.input_resolution
         cfg_imsize = cfg.INPUT.SIZE[0]
         assert cfg_imsize == clip_imsize, f"cfg_imsize ({cfg_imsize}) must equal to clip_imsize ({clip_imsize})"
-        
+
         # for global prompt initialization: frozen and hand-crafted 'a photo of {c}'
         if ctx_init:
             # use given words to initialize context vectors
@@ -83,7 +86,7 @@ class PromptLearner(nn.Module):
             prompt = clip.tokenize(ctx_init)
             with torch.no_grad():
                 embedding = clip_model.token_embedding(prompt).type(dtype)
-            global_ctx_vectors = embedding[0, 1 : 1 + n_ctx, :]
+            global_ctx_vectors = embedding[0, 1: 1 + n_ctx, :]
             prompt_prefix = ctx_init
 
         else:
@@ -99,15 +102,15 @@ class PromptLearner(nn.Module):
 
         print(f'Initial global prompt context: "{prompt_prefix}"')
         print(f"Number of context words (tokens): {n_ctx}")
-        
+
         classnames = [name.replace("_", " ") for name in classnames]
         name_lens = [len(_tokenizer.encode(name)) for name in classnames]
         global_prompts = ["a photo of a" + " " + name + "." for name in classnames]
-        
+
         global_tokenized_prompts = torch.cat([clip.tokenize(p).cuda() for p in global_prompts])
         with torch.no_grad():
             embedding = clip_model.token_embedding(global_tokenized_prompts).type(dtype)
-        
+
         self.global_embedding = embedding
         self.global_tokenized_prompts = global_tokenized_prompts  # torch.Tensor  #1000,77
         self.class_token_position = cfg.TRAINER.LOCALPROMPT.CLASS_TOKEN_POSITION
@@ -120,7 +123,7 @@ class PromptLearner(nn.Module):
             prompt = clip.tokenize(ctx_init)
             with torch.no_grad():
                 embedding = clip_model.token_embedding(prompt).type(dtype)
-            local_ctx_vectors = embedding[0, 1 : 1 + n_ctx, :]
+            local_ctx_vectors = embedding[0, 1: 1 + n_ctx, :]
             prompt_prefix = ctx_init
 
         else:
@@ -135,7 +138,7 @@ class PromptLearner(nn.Module):
         print(f"Number of context words (tokens): {n_ctx}")
 
         self.local_ctx = nn.Parameter(local_ctx_vectors)  # to be optimized
-        
+
         local_prompts = [prompt_prefix + " " + name + "." for name in classnames]
         local_tokenized_prompts = torch.cat([clip.tokenize(p).cuda() for p in local_prompts])
 
@@ -160,7 +163,7 @@ class PromptLearner(nn.Module):
         print(f"Number of context words (tokens): {n_ctx}")
 
         self.neg_ctx = nn.Parameter(neg_ctx_vectors)  # to be optimized
-         
+
         neg_prompts = [neg_prompt_prefix + " " + "." for _ in range(self.num_neg_prompts)]
         neg_tokenized_prompts = torch.cat([clip.tokenize(p).cuda() for p in neg_prompts])
 
@@ -170,42 +173,41 @@ class PromptLearner(nn.Module):
         # These token vectors will be saved when in save_model(),
         # but they should be ignored in load_model() as we want to use
         # those computed using the current class names
-        
+
         self.register_buffer("neg_token_prefix", embedding[:, :1, :])  # SOS
         self.register_buffer("neg_token_suffix", embedding[:, 1 + n_ctx:, :])  # CLS, EOS
-        
+
         self.neg_tokenized_prompts = neg_tokenized_prompts
 
     def forward(self):
         assert self.class_token_position == 'end', 'not expected class token position.'
-        
-        local_ctx = self.local_ctx #100,16,512
+
+        local_ctx = self.local_ctx  # 100,16,512
         if local_ctx.dim() == 2:
             local_ctx = local_ctx.unsqueeze(0).expand(self.num_ood_prompts, -1, -1)
 
-        prefix = self.token_prefix #100,1,512
-        suffix = self.token_suffix #1000,60,512
+        prefix = self.token_prefix  # 100,1,512
+        suffix = self.token_suffix  # 1000,60,512
 
         local_prompts = torch.cat(
             [
                 prefix,  # (n_cls, 1, dim)
-                local_ctx,     # (n_cls, n_ctx, dim)
+                local_ctx,  # (n_cls, n_ctx, dim)
                 suffix,  # (n_cls, *, dim)
             ],
             dim=1,
         )
-        
-        
+
         if local_ctx.dim() == 2:
             local_ctx = local_ctx.unsqueeze(0).expand(self.num_neg_prompts, -1, -1)
 
-        neg_prefix = self.neg_token_prefix #100,1,512
-        neg_suffix = self.neg_token_suffix #1000,60,512
+        neg_prefix = self.neg_token_prefix  # 100,1,512
+        neg_suffix = self.neg_token_suffix  # 1000,60,512
 
         neg_prompts = torch.cat(
             [
                 neg_prefix,  # (n_cls, 1, dim)
-                self.neg_ctx,     # (n_cls, n_ctx, dim)
+                self.neg_ctx,  # (n_cls, n_ctx, dim)
                 neg_suffix,  # (n_cls, *, dim)
             ],
             dim=1,
@@ -219,13 +221,13 @@ class CustomCLIP(nn.Module):
         super().__init__()
         self.prompt_learner = PromptLearner(cfg, classnames, clip_model)
         self.global_tokenized_prompts = self.prompt_learner.global_tokenized_prompts
-        self.local_tokenized_prompts =self.prompt_learner.local_tokenized_prompts
+        self.local_tokenized_prompts = self.prompt_learner.local_tokenized_prompts
         self.neg_tokenized_prompts = self.prompt_learner.neg_tokenized_prompts
         self.image_encoder = clip_model.visual
         self.text_encoder = TextEncoder(clip_model)
         self.logit_scale = clip_model.logit_scale
         self.dtype = clip_model.dtype
-    
+
     def multi_loader_select(self, images, label):
         '''
         Global Prompt Guided Negative Augmentation
@@ -234,7 +236,7 @@ class CustomCLIP(nn.Module):
         with torch.no_grad():
             image_features, local_image_features = [], []
             similarity_list = []
-            
+
             for image in images:
                 image_feature, local_image_feature = self.image_encoder(image.type(self.dtype))
                 image_features.append(image_feature)
@@ -245,16 +247,18 @@ class CustomCLIP(nn.Module):
             global_text_features = self.text_encoder(global_prompts, global_tokenized_prompts)
             global_text_features = global_text_features / global_text_features.norm(dim=-1, keepdim=True)
 
-            image_features = [image_feature / image_feature.norm(dim=-1, keepdim=True) for image_feature in image_features]
-            global_text_selected_label = global_text_features.gather(0, label[...,None].expand_as(image_features[0]))
+            image_features = [image_feature / image_feature.norm(dim=-1, keepdim=True) for image_feature in
+                              image_features]
+            global_text_selected_label = global_text_features.gather(0, label[..., None].expand_as(image_features[0]))
 
             for image_feature in image_features:
-                similarity_list.append(torch.nn.functional.cosine_similarity(image_feature, global_text_selected_label, dim=-1))
+                similarity_list.append(
+                    torch.nn.functional.cosine_similarity(image_feature, global_text_selected_label, dim=-1))
 
             image_features = torch.stack(image_features, dim=0)
             local_image_features = torch.stack(local_image_features, dim=0)
             similarity_list = torch.stack(similarity_list, dim=0)
-            
+
             return similarity_list, image_features, local_image_features
 
     def simple_extract(self, images):
@@ -262,7 +266,6 @@ class CustomCLIP(nn.Module):
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
         local_image_features = local_image_features / local_image_features.norm(dim=-1, keepdim=True)
         return image_features
-
 
     def forward(self, images, image_features=None, local_image_features=None, max_list=None, min_list=None):
         if self.training:
@@ -304,7 +307,6 @@ class CustomCLIP(nn.Module):
             loss_div = torch.sum(loss_div, dim=-1) / self.prompt_learner.num_neg_prompts
             loss_div = torch.sum(loss_div, dim=-1) / (self.prompt_learner.num_neg_prompts - 1)
 
-
             return logits_local, p2n_logits_local, n2p_logits_local, neg_logits_local, loss_div
 
         else:  # for inference
@@ -337,9 +339,7 @@ class CustomCLIP(nn.Module):
             return logits, logits_local, neg_logits_local
 
 
-
 def obtain_ImageNet20_classes():
-
     class_dict = {"n04147183": "sailboat", "n02951358": "canoe", "n02782093": "balloon", "n04389033": "tank",
                   "n03773504": "missile",
                   "n02917067": "bullet train", "n02317335": "starfish", "n01632458": "spotted salamander",
@@ -349,11 +349,11 @@ def obtain_ImageNet20_classes():
                   "n02132136": "brown bear", "n03785016": "moped", "n04310018": "steam locomotive",
                   "n04266014": "space shuttle", "n04252077": "snowmobile"}
 
-
     # sort by values
     class_dict = {k: v for k, v in sorted(
         class_dict.items(), key=lambda item: item[0])}
     return class_dict.values()
+
 
 @TRAINER_REGISTRY.register()
 class LOCALPROMPT(TrainerX):
@@ -367,16 +367,14 @@ class LOCALPROMPT(TrainerX):
     def build_model(self):
         cfg = self.cfg
         # if cfg.in_dataset == "imagenet20":
-        #classnames = obtain_ImageNet20_classes()
+        # classnames = obtain_ImageNet20_classes()
         # else:
         classnames = self.dm.dataset.classnames
         self.top_k = cfg.topk
         self.T = cfg.T
 
-
         print(f"Loading CLIP (backbone: {cfg.MODEL.BACKBONE.NAME})")
         clip_model = load_clip_to_cpu(cfg)
-
 
         if cfg.TRAINER.LOCALPROMPT.PREC == "fp32" or cfg.TRAINER.LOCALPROMPT.PREC == "amp":
             # CLIP's default precision is fp16
@@ -408,9 +406,7 @@ class LOCALPROMPT(TrainerX):
             print(f"Multiple GPUs detected (n_gpus={device_count}), use all of them!")
             self.model = nn.DataParallel(self.model)
 
-
     def calculate_loss_local(self, output_local, p2n_output_local, label):
-
 
         # output_local = output_local.unsqueeze(0)
         # p2n_output_local = p2n_output_local.unsqueeze(0)
@@ -419,25 +415,28 @@ class LOCALPROMPT(TrainerX):
 
         # batch,n,c ->  batch,n,1 -> batch,k,1 -> batch,k
         # output_local = output_local.unsqueeze(0)
-        label_output_local = output_local.gather(2, repeat(label,'b -> b n 1', n=output_local.shape[1])) # batch,n,1
+        label_output_local = output_local.gather(2, repeat(label, 'b -> b n 1', n=output_local.shape[1]))  # batch,n,1
 
-        label_topk_output_local_pos = label_output_local.topk(k=self.top_k, dim=1)[1] # batch,k,1
+        label_topk_output_local_pos = label_output_local.topk(k=self.top_k, dim=1)[1]  # batch,k,1
 
-        label_topk_output_local = label_output_local.gather(1, label_topk_output_local_pos).squeeze() # batch, k
+        label_topk_output_local = label_output_local.gather(1, label_topk_output_local_pos).squeeze()  # batch, k
 
         pos_topk_ouput_local = output_local.topk(k=self.top_k, dim=1)[0]  # batch, k, c
 
-        neg_topk_output_local = p2n_output_local.topk(k=self.top_k, dim=1)[0] # batch, k, c
+        neg_topk_output_local = p2n_output_local.topk(k=self.top_k, dim=1)[0]  # batch, k, c
 
         # To prevent overflow. for simplicity, divide both the numerator and denominator by the first number
         # label_topk_output_local = label_topk_output_local.unsqueeze(0)
 
-
-        common_factor = label_topk_output_local[:,0]
+        common_factor = label_topk_output_local[:, 0]
         # label_topk_output_local[:, 0:1].expand_as(label_topk_output_local) # it seems useless
 
-        local_contrastive = torch.sum(torch.exp((label_topk_output_local-repeat(common_factor,'b-> b k', k=self.top_k))/self.T), dim=-1)/ \
-            torch.sum(torch.exp((torch.cat((pos_topk_ouput_local, neg_topk_output_local),dim=-1).reshape(-1,self.top_k * total_local_prompts)-repeat(common_factor,'b-> b k', k=self.top_k*total_local_prompts))/self.T), dim=-1)
+        local_contrastive = torch.sum(
+            torch.exp((label_topk_output_local - repeat(common_factor, 'b-> b k', k=self.top_k)) / self.T), dim=-1) / \
+                            torch.sum(torch.exp((torch.cat((pos_topk_ouput_local, neg_topk_output_local),
+                                                           dim=-1).reshape(-1,
+                                                                           self.top_k * total_local_prompts) - repeat(
+                                common_factor, 'b-> b k', k=self.top_k * total_local_prompts)) / self.T), dim=-1)
 
         loss_local = -torch.mean(torch.log(local_contrastive))
         return loss_local
@@ -452,17 +451,25 @@ class LOCALPROMPT(TrainerX):
 
         total_local_prompts = self.model.prompt_learner.num_local_prompts + self.model.prompt_learner.num_neg_prompts
 
-        label_output_local = p2n_output_local.gather(2, repeat(label,'b -> b n 1', n=output_local.shape[1])) # batch,n,1
-        label_topk_output_local_pos = label_output_local.topk(k=self.top_k, dim=1)[1] # batch, k, 1
+        label_output_local = p2n_output_local.gather(2,
+                                                     repeat(label, 'b -> b n 1', n=output_local.shape[1]))  # batch,n,1
+        label_topk_output_local_pos = label_output_local.topk(k=self.top_k, dim=1)[1]  # batch, k, 1
 
-        pos_topk_ouput_local = output_local.gather(1, repeat(label_topk_output_local_pos, 'b k 1 -> b k n', n=self.model.prompt_learner.num_neg_prompts))
+        pos_topk_ouput_local = output_local.gather(1, repeat(label_topk_output_local_pos, 'b k 1 -> b k n',
+                                                             n=self.model.prompt_learner.num_neg_prompts))
 
         neg_topk_output_local = p2n_output_local.topk(k=self.top_k, dim=1)[0]  # batch, n, c
 
         # To prevent overflow. for simplicity, divide both the numerator and denominator by the first number
         common_factor = pos_topk_ouput_local[:, 0, 0]
-        local_contrastive = torch.sum(torch.exp((pos_topk_ouput_local - repeat(common_factor,'b -> b k n', k=self.top_k, n=self.model.prompt_learner.num_neg_prompts))/self.T), dim=(1,2))/ \
-            torch.sum(torch.exp((torch.cat((pos_topk_ouput_local, neg_topk_output_local),dim=-1)-repeat(common_factor,'b -> b k n ', k=self.top_k, n=total_local_prompts))/self.T), dim=(1,2))
+        local_contrastive = torch.sum(torch.exp((pos_topk_ouput_local - repeat(common_factor, 'b -> b k n',
+                                                                               k=self.top_k,
+                                                                               n=self.model.prompt_learner.num_neg_prompts)) / self.T),
+                                      dim=(1, 2)) / \
+                            torch.sum(torch.exp((torch.cat((pos_topk_ouput_local, neg_topk_output_local),
+                                                           dim=-1) - repeat(common_factor, 'b -> b k n ', k=self.top_k,
+                                                                            n=total_local_prompts)) / self.T),
+                                      dim=(1, 2))
 
         loss_local_neg = -torch.mean(torch.log(local_contrastive))
 
@@ -476,12 +483,20 @@ class LOCALPROMPT(TrainerX):
         self.div_value = self.cfg.div_value
         if prec == "amp":
             similarity_list, image_features, local_image_features = self.model.multi_loader_select(image, label)
-            max_list, min_list = torch.topk(similarity_list, k=num_pos, dim=0)[1], torch.topk(similarity_list, k=num_pos, largest=False, dim=0)[1]
-            
+            max_list, min_list = torch.topk(similarity_list, k=num_pos, dim=0)[1], \
+                                 torch.topk(similarity_list, k=num_pos, largest=False, dim=0)[1]
+
             for i in range(num_pos):
                 with autocast():
-                    output_local, p2n_output_local, n2p_output_local, neg_output_local, loss_div = self.model(image, image_features, local_image_features, max_list[i:i+1,:], min_list[0:1,:])
-                    
+                    output_local, p2n_output_local, n2p_output_local, neg_output_local, loss_div = self.model(image,
+                                                                                                              image_features,
+                                                                                                              local_image_features,
+                                                                                                              max_list[
+                                                                                                              i:i + 1,
+                                                                                                              :],
+                                                                                                              min_list[
+                                                                                                              0:1, :])
+
                     # Local Prompt Enhanced Regional Regularization
                     # calculate local loss 
                     loss_local = self.calculate_loss_local(output_local, n2p_output_local, label)
@@ -517,7 +532,7 @@ class LOCALPROMPT(TrainerX):
 
         inputs = []
         for i in range(num):
-            inputs.append(total_batch["img"+str(i+1)].to(self.device))
+            inputs.append(total_batch["img" + str(i + 1)].to(self.device))
         label = total_batch["label"].to(self.device)
         return inputs, label
 
@@ -557,8 +572,6 @@ class LOCALPROMPT(TrainerX):
             # set strict=False
             self._models[name].load_state_dict(state_dict, strict=False)
 
-
-
     @torch.no_grad()
     def test(self, split=None):
         """A generic testing pipeline."""
@@ -567,7 +580,7 @@ class LOCALPROMPT(TrainerX):
         self.evaluator.reset()
 
         if split is None:
-            split = self.cfg.TEST.SPLIT # test
+            split = self.cfg.TEST.SPLIT  # test
 
         if split == "val" and self.val_loader is not None:
             data_loader = self.val_loader
@@ -585,8 +598,8 @@ class LOCALPROMPT(TrainerX):
             output_global /= 100.0
             output_local /= 100.0
 
-            local_score = torch.topk(torch.exp(output_local/self.T), k=self.top_k, dim=1)[0]
-            output = torch.exp(output_global)*torch.mean(local_score, dim=1)
+            local_score = torch.topk(torch.exp(output_local / self.T), k=self.top_k, dim=1)[0]
+            output = torch.exp(output_global) * torch.mean(local_score, dim=1)
 
             outputs.append(F.softmax(output, dim=-1).data.cpu().numpy())
             pred = output.max(dim=1)[1]
@@ -618,7 +631,7 @@ class LOCALPROMPT(TrainerX):
         self.set_model_mode("eval")
         self.model.eval()
         self.evaluator.reset()
-        
+
         mcm_score = []
         gl_mcm_score = []
         r_mcm_score = []
@@ -633,7 +646,6 @@ class LOCALPROMPT(TrainerX):
             output /= 100.0
             output_local /= 100.0
             neg_output_local /= 100.0
-
 
             # mcm
             mcm_global_score = MCM_Score(output, T)
@@ -657,7 +669,8 @@ class LOCALPROMPT(TrainerX):
             slcm_score.append(slcm_local_score)
 
             # slcm_neg
-            slcm_local_score_neg = SLCM_Score(output, output_local, T, lamda, topk=top_k, neg_output_local=neg_output_local)
+            slcm_local_score_neg = SLCM_Score(output, output_local, T, lamda, topk=top_k,
+                                              neg_output_local=neg_output_local)
             slcm_score_neg.append(slcm_local_score_neg)
 
         return concat(mcm_score)[:len(data_loader.dataset)].copy(), \
@@ -687,8 +700,8 @@ class LOCALPROMPT(TrainerX):
         for batch_idx, batch in enumerate(tqdm(data_loader)):
             images, labels = self.parse_batch_test(batch)
 
-        # for batch_idx, (images, labels, *id_flag) in enumerate(tqdm(data_loader)):
-        #     images = images.cuda()
+            # for batch_idx, (images, labels, *id_flag) in enumerate(tqdm(data_loader)):
+            #     images = images.cuda()
 
             output, output_local, neg_output_local = self.model_inference(images)
             output /= 100.0
@@ -729,5 +742,6 @@ class LOCALPROMPT(TrainerX):
                concat(slcm_score_neg)[:len(data_loader.dataset)].copy()
 
     def Info(self):
-        names = ["MCM score", "GL-MCM score", "R-MCM score", "R-MCM score with neg", "SLCM score", "SLCM score with neg"]
+        names = ["MCM score", "GL-MCM score", "R-MCM score", "R-MCM score with neg", "SLCM score",
+                 "SLCM score with neg"]
         return names
