@@ -236,7 +236,7 @@
 
 ## Acknowledgememnt
 
-The code are heavily borrowed from  [CoOp](https://github.com/KaiyangZhou/CoOp), [LoCoOp](https://github.com/AtsuMiyai/LoCoOp) and [Local-Prompt](https://github.com/AuroraZengfh/Local-Prompt).
+This repo is heavily borrowed from  [CoOp](https://github.com/KaiyangZhou/CoOp), [LoCoOp](https://github.com/AtsuMiyai/LoCoOp) and [Local-Prompt](https://github.com/AuroraZengfh/Local-Prompt).
 
 Thanks for these great works and open sourcing!
 If you find them helpful, please consider citing them as well. 
