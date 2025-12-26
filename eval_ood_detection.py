@@ -12,9 +12,10 @@ from utils.plot_util import plot_distribution
 import trainers.localprompt
 import trainers.prosimo
 import trainers.iim
-import trainers.locoop# import trainers.prosimohyper
+import trainers.locoop  # import trainers.prosimohyper
 import datasets.imagenet
 import os
+
 
 def print_args(args, cfg):
     print("***************")
@@ -64,6 +65,7 @@ def reset_cfg(cfg, args):
     if args.alpha:
         cfg.alpha = args.alpha
 
+
 def extend_cfg(cfg):
     """
     Add new config variables.
@@ -76,7 +78,7 @@ def extend_cfg(cfg):
         cfg.TRAINER.MY_MODEL.PARAM_C = False
     """
     from yacs.config import CfgNode as CN
-    
+
     cfg.TRAINER.LOCALPROMPT = CN()
     cfg.TRAINER.LOCALPROMPT.N_CTX = 16  # number of context vectors
     cfg.TRAINER.LOCALPROMPT.V_CTX = 8  # number of context vectors
@@ -84,7 +86,6 @@ def extend_cfg(cfg):
     cfg.TRAINER.LOCALPROMPT.CTX_INIT = ""  # initialization words
     cfg.TRAINER.LOCALPROMPT.PREC = "amp"  # fp16, fp32, amp
     cfg.TRAINER.LOCALPROMPT.CLASS_TOKEN_POSITION = "end"  # 'middle' or 'end' or 'front'
-
 
     cfg.TRAINER.LoCoOp = CN()
     cfg.TRAINER.LoCoOp.N_CTX = 16  # number of context vectors
@@ -149,7 +150,7 @@ def main(args):
     import clip_w_local
     cfg = setup_cfg(args)
     _, preprocess = clip_w_local.load(cfg.MODEL.BACKBONE.NAME)
-    
+
     if cfg.SEED >= 0:
         print("Setting fixed seed: {}".format(cfg.SEED))
         set_random_seed(cfg.SEED)
@@ -170,9 +171,7 @@ def main(args):
         out_datasets = ['imagenet10']
     else:
         raise NotImplementedError('dataset not implement yet')
-    # print(cfg)
-    # print(cfg.lambda_value)
-    
+
     trainer = build_trainer(cfg)
 
     trainer.load_model(args.model_dir, epoch=args.load_epoch)
@@ -196,20 +195,6 @@ def main(args):
     else:
         in_scores = trainer.test_ood(id_data_loader, args.top_k, args.T)
 
-    # TODO
-    # print(f"Evaluting OOD dataset Imagenet")
-    # out_score_mcm, out_score_localprompt = trainer.test_ood_imagenet(trainer.val_loader, args.top_k, args.T)
-    # print("MCM score")
-    # get_and_print_results(args, in_score_mcm, out_score_mcm,
-    #                       auroc_list_mcm, aupr_list_mcm, fpr_list_mcm)
-    #
-    # print("Local-Prompt score")
-    # get_and_print_results(args, in_score_localprompt, out_score_localprompt,
-    #                       auroc_list_localprompt, aupr_list_localprompt, fpr_list_localprompt)
-    #
-    # plot_distribution(args, in_score_mcm, out_score_mcm, "imagenet", score='MCM')
-    # plot_distribution(args, in_score_localprompt, out_score_localprompt, "imagenet", score='Local-Prompt')
-
     for out_dataset in out_datasets:
 
         print(f"Evaluting OOD dataset {out_dataset}")
@@ -224,7 +209,8 @@ def main(args):
             # plot_distribution(args, in_scores[i], out_scores[i], out_dataset, score=score_names[i])
 
     for i in range(num_score):
-        print("{} avg. FPR:{}, AUROC:{}, AUPR:{}".format(score_names[i], np.mean(fpr_list[i]), np.mean(auroc_list[i]), np.mean(aupr_list[i])))
+        print("{} avg. FPR:{}, AUROC:{}, AUPR:{}".format(score_names[i], np.mean(fpr_list[i]), np.mean(auroc_list[i]),
+                                                         np.mean(aupr_list[i])))
     return
 
 
@@ -268,7 +254,7 @@ if __name__ == "__main__":
         nargs=argparse.REMAINDER,
         help="modify config options using the command-line",
     )
-    # augment for LOCALPROMPT
+
     parser.add_argument('-b', '--batch-size', default=100, type=int,
                         help='mini-batch size')
     parser.add_argument('--num_neg_prompts', type=int, default=300,
@@ -280,11 +266,11 @@ if __name__ == "__main__":
     parser.add_argument('--alpha', type=float, default=0.5,
                         help='topk for extracted OOD regions')
     parser.add_argument('--lambda_value', type=float, default=5,
-                        help='weight for negative ')
+                        help='weight for negative')
+
     args = parser.parse_args()
     main(args)
     sys.stdout.flush()
     sys.stderr.flush()
-    print("finished!!!!!!!!!!!!!!!!!!!!")
+    print("Finished, dude:)")
     os._exit(0)
-    # os._exit(0)

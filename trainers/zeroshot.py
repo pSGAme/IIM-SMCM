@@ -10,7 +10,6 @@ from dassl.engine import TRAINER_REGISTRY, TrainerX
 from dassl.utils import load_pretrained_weights, load_checkpoint
 from dassl.optim import build_optimizer, build_lr_scheduler
 
-
 from clip_w_local import clip
 from clip_w_local.simple_tokenizer import SimpleTokenizer as _Tokenizer
 import numpy as np
@@ -116,7 +115,6 @@ class CustomCLIP(nn.Module):
         return image_features, global_text_features
 
     def forward(self, images):
-
         global_prompts = self.prompt_learner()
         global_tokenized_prompts = self.global_tokenized_prompts
 
@@ -124,7 +122,7 @@ class CustomCLIP(nn.Module):
         image_features, local_image_features = self.image_encoder(images.type(self.dtype))
 
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-       # print(image_features[0][0:10])
+        # print(image_features[0][0:10])
 
         local_image_features = local_image_features / local_image_features.norm(dim=-1, keepdim=True)
         global_text_features = global_text_features / global_text_features.norm(dim=-1, keepdim=True)
@@ -133,7 +131,6 @@ class CustomCLIP(nn.Module):
         logit_scale = self.logit_scale.exp()
         logits = logit_scale * image_features @ global_text_features.t()
         logits_local = logit_scale * local_image_features @ global_text_features.t()
-
 
         return logits, logits_local
 
@@ -182,13 +179,13 @@ class ZeroShot(TrainerX):
         outputs_text = None
 
         print("Extracting on the *val (class different)* set")
-        for batch_idx, batch in enumerate(tqdm(self.val_loader)): # whatever loader is ok, i just want the text
+        for batch_idx, batch in enumerate(tqdm(self.val_loader)):  # whatever loader is ok, i just want the text
             input, label = self.parse_batch_test(batch)
             output_val_image, outputs_text = self.model.simple_extract(input)
             outputs_val_image.append(output_val_image)
             break
 
-        return torch.cat(outputs_val_image, dim=0),  outputs_text
+        return torch.cat(outputs_val_image, dim=0), outputs_text
 
     @torch.no_grad()
     def test(self, split=None):
@@ -241,7 +238,6 @@ class ZeroShot(TrainerX):
 
         return list(results.values())[0], np.concatenate(outputs, axis=0), list_correct
 
-
     @torch.no_grad()
     def test_ood(self, data_loader, top_k, T):
         """Test-time OOD detection pipeline."""
@@ -255,7 +251,7 @@ class ZeroShot(TrainerX):
         mcm_score = []
         gl_mcm_score = []
         r_mcm_score = []
-        slcm_score = []
+        s_mcm_score = []
 
         for batch_idx, (images, labels, *id_flag) in enumerate(tqdm(data_loader)):
             images = images.cuda()
@@ -264,64 +260,7 @@ class ZeroShot(TrainerX):
             output /= 100.0
             output_local /= 100.0
 
-
             mcm_global_score = MCM_Score(output, T)
-            mcm_score.append(mcm_global_score)
-
-            #gl-mcm
-            N, C = output_local.shape[1:]
-            S1 = torch.sum(torch.exp(output_local / T), dim=-1, keepdim=True)
-            smax_local = torch.topk((torch.exp(output_local / T) / (S1)).reshape(-1, N * C), k=1, dim=-1)[0]
-            gl_mcm_local_score = -to_np(torch.mean(smax_local, dim=1))
-            gl_mcm_score.append(mcm_global_score + gl_mcm_local_score)
-
-
-            # r-mcm
-            N, C = output_local.shape[1:]
-            S1 = torch.sum(torch.exp(output_local / T), dim=-1, keepdim=True)
-            smax_local = torch.topk((torch.exp(output_local / T) / (S1)).reshape(-1, N * C), k=top_k, dim=-1)[0]
-            r_mcm_local_score = -to_np(torch.mean(smax_local, dim=1))
-            r_mcm_score.append(mcm_global_score + r_mcm_local_score)
-
-            #glcm
-            output_local_t = output_local.permute(0, 2, 1)
-            N, C = output_local_t.shape[1:]
-            S1 = torch.sum(torch.exp(output_local_t / T), dim=-1, keepdim=True)
-            smax_local_t = torch.topk((torch.exp(output_local_t / T) / S1).reshape(-1, N * C), k=top_k, dim=-1)[0]
-            mcm_local_score_t = -to_np(torch.mean(smax_local_t, dim=1))
-            slcm_score.append(mcm_global_score + 1.0 * gl_mcm_local_score + 0.2 * mcm_local_score_t)
-
-        return concat(mcm_score)[:len(data_loader.dataset)].copy(), \
-               concat(gl_mcm_score)[:len(data_loader.dataset)].copy(), \
-               concat(r_mcm_score)[:len(data_loader.dataset)].copy(), \
-               concat(slcm_score)[:len(data_loader.dataset)].copy()
-
-    @torch.no_grad()
-    def test_ood_imagenet(self, data_loader, top_k, T):
-        """Test-time OOD detection pipeline."""
-        to_np = lambda x: x.data.cpu().numpy()
-        concat = lambda x: np.concatenate(x, axis=0)
-
-        self.set_model_mode("eval")
-        self.model.eval()
-        self.evaluator.reset()
-
-        mcm_score = []
-        gl_mcm_score = []
-        r_mcm_score = []
-        slcm_score = []
-       # print(data_loader)
-
-        for batch_idx, batch in enumerate(tqdm(data_loader)):
-          #  print(batch)
-            images, labels = self.parse_batch_test(batch)
-
-            output, output_local = self.model_inference(images)
-            output /= 100.0
-            output_local /= 100.0
-
-            smax_global = to_np(F.softmax(output / T, dim=-1))
-            mcm_global_score = -np.max(smax_global, axis=1)
             mcm_score.append(mcm_global_score)
 
             # gl-mcm
@@ -344,9 +283,62 @@ class ZeroShot(TrainerX):
             S1 = torch.sum(torch.exp(output_local_t / T), dim=-1, keepdim=True)
             smax_local_t = torch.topk((torch.exp(output_local_t / T) / S1).reshape(-1, N * C), k=top_k, dim=-1)[0]
             mcm_local_score_t = -to_np(torch.mean(smax_local_t, dim=1))
-            slcm_score.append(mcm_global_score + 1.0 * gl_mcm_local_score + 0.2 * mcm_local_score_t)
+            s_mcm_score.append(mcm_global_score + 1.0 * gl_mcm_local_score + 1.0 * mcm_local_score_t)
 
         return concat(mcm_score)[:len(data_loader.dataset)].copy(), \
                concat(gl_mcm_score)[:len(data_loader.dataset)].copy(), \
                concat(r_mcm_score)[:len(data_loader.dataset)].copy(), \
-               concat(slcm_score)[:len(data_loader.dataset)].copy()
+               concat(s_mcm_score)[:len(data_loader.dataset)].copy()
+
+    @torch.no_grad()
+    def test_ood_imagenet(self, data_loader, top_k, T):
+        """Test-time OOD detection pipeline."""
+        to_np = lambda x: x.data.cpu().numpy()
+        concat = lambda x: np.concatenate(x, axis=0)
+
+        self.set_model_mode("eval")
+        self.model.eval()
+        self.evaluator.reset()
+
+        mcm_score = []
+        gl_mcm_score = []
+        r_mcm_score = []
+        s_mcm_score = []
+
+        for batch_idx, batch in enumerate(tqdm(data_loader)):
+            images, labels = self.parse_batch_test(batch)
+
+            output, output_local = self.model_inference(images)
+            output /= 100.0
+            output_local /= 100.0
+
+            smax_global = to_np(F.softmax(output / T, dim=-1))
+            mcm_global_score = -np.max(smax_global, axis=1)
+            mcm_score.append(mcm_global_score)
+
+            # gl-mcm
+            N, C = output_local.shape[1:]
+            S1 = torch.sum(torch.exp(output_local / T), dim=-1, keepdim=True)
+            smax_local = torch.topk((torch.exp(output_local / T) / S1).reshape(-1, N * C), k=1, dim=-1)[0]
+            gl_mcm_local_score = -to_np(torch.mean(smax_local, dim=1))
+            gl_mcm_score.append(mcm_global_score + gl_mcm_local_score)
+
+            # r-mcm
+            N, C = output_local.shape[1:]
+            S1 = torch.sum(torch.exp(output_local / T), dim=-1, keepdim=True)
+            smax_local = torch.topk((torch.exp(output_local / T) / S1).reshape(-1, N * C), k=top_k, dim=-1)[0]
+            r_mcm_local_score = -to_np(torch.mean(smax_local, dim=1))
+            r_mcm_score.append(mcm_global_score + r_mcm_local_score)
+
+            # s-mcm
+            output_local_t = output_local.permute(0, 2, 1)
+            N, C = output_local_t.shape[1:]
+            S1 = torch.sum(torch.exp(output_local_t / T), dim=-1, keepdim=True)
+            smax_local_t = torch.topk((torch.exp(output_local_t / T) / S1).reshape(-1, N * C), k=top_k, dim=-1)[0]
+            mcm_local_score_t = -to_np(torch.mean(smax_local_t, dim=1))
+            s_mcm_score.append(mcm_global_score + 1.0 * gl_mcm_local_score + 1.0 * mcm_local_score_t)
+
+        return concat(mcm_score)[:len(data_loader.dataset)].copy(), \
+               concat(gl_mcm_score)[:len(data_loader.dataset)].copy(), \
+               concat(r_mcm_score)[:len(data_loader.dataset)].copy(), \
+               concat(s_mcm_score)[:len(data_loader.dataset)].copy()
