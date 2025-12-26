@@ -12,6 +12,7 @@ import trainers.prosimo
 import trainers.zeroshot
 # import trainers.prosimohyper
 import datasets.imagenet
+import datasets.fgvc_aircraft
 import os
 
 def print_args(args, cfg):
@@ -139,7 +140,7 @@ def main(args):
     print("Collecting env info ...")
     print("** System info **\n{}\n".format(collect_env_info()))
 
-    if args.in_dataset in ['imagenet', 'imagenet100']:
+    if args.in_dataset in ['imagenet', 'imagenet100', 'fgvc_aircraft']:
         out_datasets = ['iNaturalist', 'SUN', 'places365', 'Texture']
     elif args.in_dataset in ['imagenet10']:
         out_datasets = ['imagenet20']
@@ -150,7 +151,9 @@ def main(args):
     
     trainer = build_trainer(cfg)
     trainer.model.training = False
-    id_data_loader = set_val_loader(args, preprocess)
+
+    #
+    id_data_loader = None  # for fgvc_aircraft
 
     # TODO
     # id_acc = trainer.test(id_data_loader)[0]
@@ -163,11 +166,44 @@ def main(args):
     auroc_list_r_mcm, aupr_list_r_mcm, fpr_list_r_mcm = [], [], []
     auroc_list_slcm, aupr_list_slcm, fpr_list_slcm = [], [], []
 
-    if args.in_dataset == "imagenet" and cfg.DATASET.SUBSAMPLE_CLASSES != "all":
+    if cfg.DATASET.SUBSAMPLE_CLASSES != "all":
         in_score_mcm, in_score_gl_mcm, in_score_r_mcm, in_score_slcm = trainer.test_ood_imagenet(trainer.test_loader, args.top_k, args.T)
+
+        print(f"Evaluting fine-grained OOD dataset Imagenet")
+        out_score_mcm, out_score_gl_mcm, out_score_r_mcm, out_score_slcm = trainer.test_ood_imagenet(trainer.val_loader,
+                                                                                                     args.top_k, args.T)
+        print("MCM score")
+        print("MCM score")
+        get_and_print_results(args, in_score_mcm, out_score_mcm,
+                              auroc_list_mcm, aupr_list_mcm, fpr_list_mcm)
+        #
+        print("GL-MCM score")
+        get_and_print_results(args, in_score_gl_mcm, out_score_gl_mcm,
+                              auroc_list_gl_mcm, aupr_list_gl_mcm, fpr_list_gl_mcm)
+
+        print("R-MCM score")
+        get_and_print_results(args, in_score_r_mcm, out_score_r_mcm,
+                              auroc_list_r_mcm, aupr_list_r_mcm, fpr_list_r_mcm)
+
+        print("SLCM score")
+        get_and_print_results(args, in_score_slcm, out_score_slcm,
+                              auroc_list_slcm, aupr_list_slcm, fpr_list_slcm)
     else:
+        id_data_loader = set_val_loader(args, preprocess)
         in_score_mcm, in_score_gl_mcm, in_score_r_mcm, in_score_slcm = trainer.test_ood(id_data_loader, args.top_k, args.T)
 
+
+
+    #
+    # # out_score_mcm, out_score_localprompt = trainer.test_ood_imagenet(trainer.val_loader, args.top_k, args.T)
+    # # print("MCM score")
+    # # get_and_print_results(args, in_score_mcm, out_score_mcm,
+    # #                       auroc_list_mcm, aupr_list_mcm, fpr_list_mcm)
+    # #
+    # # print("Local-Prompt score")
+    # # get_and_print_results(args, in_score_localprompt, out_score_localprompt,
+    # #                       auroc_list_localprompt, aupr_list_localprompt, fpr_list_localprompt)
+    #
 
     for out_dataset in out_datasets:
 

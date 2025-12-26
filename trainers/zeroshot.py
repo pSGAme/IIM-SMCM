@@ -78,7 +78,7 @@ class PromptLearner(nn.Module):
         assert cfg_imsize == clip_imsize, f"cfg_imsize ({cfg_imsize}) must equal to clip_imsize ({clip_imsize})"
         # (classnames)
         classnames = [name.replace("_", " ") for name in classnames]
-        print(classnames)
+
         global_prompts = ["a photo of a" + " " + name + "" for name in classnames]
         global_tokenized_prompts = torch.cat([clip.tokenize(p).cuda() for p in global_prompts])
         with torch.no_grad():
@@ -310,8 +310,10 @@ class ZeroShot(TrainerX):
         gl_mcm_score = []
         r_mcm_score = []
         slcm_score = []
+       # print(data_loader)
 
         for batch_idx, batch in enumerate(tqdm(data_loader)):
+          #  print(batch)
             images, labels = self.parse_batch_test(batch)
 
             output, output_local = self.model_inference(images)
