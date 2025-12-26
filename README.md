@@ -186,7 +186,7 @@ The training script is in `scripts/iim/train.sh`, you can alter the parameters i
 you can simply run
 
 ```
-sh train.sh 
+sh scripts/iim/train_all.sh 
 ```
 to run all the training tasks
 

@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 ## common set
 topk=50
 lambda=5

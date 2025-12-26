@@ -225,7 +225,7 @@ if __name__ == "__main__":
                         help='weight for diversity loss')
     parser.add_argument('--topk', type=int, default=20,
                         help='topk for extracted OOD regions')
-    parser.add_argument('--alpha', type=int, default=0.9,
+    parser.add_argument('--alpha', type=int, default=1.0,
                         help='weight for text2image score.')
     parser.add_argument('--T', type=float, default=1.0,
                         help='temperature for contrastive loss')
