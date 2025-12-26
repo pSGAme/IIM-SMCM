@@ -152,8 +152,6 @@ def main(args):
     trainer = build_trainer(cfg)
     trainer.model.training = False
 
-    #
-    id_data_loader = None  # for fgvc_aircraft
 
     # TODO
     # id_acc = trainer.test(id_data_loader)[0]
@@ -173,7 +171,6 @@ def main(args):
         out_score_mcm, out_score_gl_mcm, out_score_r_mcm, out_score_slcm = trainer.test_ood_imagenet(trainer.val_loader,
                                                                                                      args.top_k, args.T)
         print("MCM score")
-        print("MCM score")
         get_and_print_results(args, in_score_mcm, out_score_mcm,
                               auroc_list_mcm, aupr_list_mcm, fpr_list_mcm)
         #
@@ -191,19 +188,6 @@ def main(args):
     else:
         id_data_loader = set_val_loader(args, preprocess)
         in_score_mcm, in_score_gl_mcm, in_score_r_mcm, in_score_slcm = trainer.test_ood(id_data_loader, args.top_k, args.T)
-
-
-
-    #
-    # # out_score_mcm, out_score_localprompt = trainer.test_ood_imagenet(trainer.val_loader, args.top_k, args.T)
-    # # print("MCM score")
-    # # get_and_print_results(args, in_score_mcm, out_score_mcm,
-    # #                       auroc_list_mcm, aupr_list_mcm, fpr_list_mcm)
-    # #
-    # # print("Local-Prompt score")
-    # # get_and_print_results(args, in_score_localprompt, out_score_localprompt,
-    # #                       auroc_list_localprompt, aupr_list_localprompt, fpr_list_localprompt)
-    #
 
     for out_dataset in out_datasets:
 
