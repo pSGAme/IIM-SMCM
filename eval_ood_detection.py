@@ -197,7 +197,7 @@ def main(args):
 
     for out_dataset in out_datasets:
 
-        print(f"Evaluting OOD dataset {out_dataset}")
+        print(f"Evaluating OOD dataset {out_dataset}")
         ood_loader = set_ood_loader_ImageNet(args, out_dataset, preprocess)
 
         out_scores = trainer.test_ood(ood_loader, args.top_k, args.T)

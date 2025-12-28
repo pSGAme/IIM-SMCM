@@ -351,3 +351,7 @@ class ZeroShot(TrainerX):
                concat(gl_mcm_score)[:len(data_loader.dataset)].copy(), \
                concat(r_mcm_score)[:len(data_loader.dataset)].copy(), \
                concat(s_mcm_score)[:len(data_loader.dataset)].copy()
+
+    def Info(self):
+        names = ["MCM score", "GL-MCM score", "R-MCM score", "S-MCM score"]
+        return names

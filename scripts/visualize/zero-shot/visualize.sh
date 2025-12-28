@@ -27,9 +27,3 @@ python visualize_imagenet1k.py \
 DATASET.SUBSAMPLE_CLASSES ${part} # args.opts
 
 
-# For local-prompt
-#CUDA_VISIBLE_DEVICES=1 sh scripts/eval.sh data imagenet vit_b16_ep30 16 10 base output/imagenet/LOCALPROMPT/vit_b16_ep30_4shots/nctx16_cscTrue_ctpend_topk50/seed1_base
-
-
-# For ProSimO
-#CUDA_VISIBLE_DEVICES=1 sh scripts/eval.sh data imagenet vit_b16_ep30 16 50 base output/imagenet/ProSimO/vit_b16_ep30_4shots/nctx16_cscTrue_ctpend_topk50x2_nocrop_lr0.00025_ep10_text_proj_true/seed2_base
