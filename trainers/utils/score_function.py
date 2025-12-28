@@ -46,7 +46,7 @@ def R_MCM_Score(output, output_local, T, topk=1, neg_output_local=None):
     return r_mcm_score
 
 
-def SLCM_Score(output, output_local, T, lamda, topk=1, neg_output_local=None):
+def S_MCM_Score(output, output_local, T, lamda, topk=1, neg_output_local=None):
     # slcm_local_score_neg = SLCM_Score(output, output_local, T, lamda, topk=top_k,
     #                                   neg_output_local=neg_output_local)
     #

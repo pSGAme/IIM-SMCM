@@ -7,6 +7,7 @@ from torchvision.transforms import InterpolationMode
 import clip_w_local
 from clip_w_local import clip
 
+
 def set_model_clip(cfg):
     backbone_name = cfg.MODEL.BACKBONE.NAME
     url = clip._MODELS[backbone_name]
@@ -31,7 +32,6 @@ def set_model_clip(cfg):
         normalize
     ])
     return model.cuda().eval(), val_preprocess
-
 
 
 def set_val_loader(args, preprocess=None):

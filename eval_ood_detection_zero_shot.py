@@ -15,6 +15,7 @@ import datasets.imagenet
 import datasets.fgvc_aircraft
 import os
 
+
 def print_args(args, cfg):
     print("***************")
     print("** Arguments **")
@@ -70,7 +71,7 @@ def extend_cfg(cfg):
         cfg.TRAINER.MY_MODEL.PARAM_C = False
     """
     from yacs.config import CfgNode as CN
-    
+
     cfg.TRAINER.LOCALPROMPT = CN()
     cfg.TRAINER.LOCALPROMPT.N_CTX = 16  # number of context vectors
     cfg.TRAINER.LOCALPROMPT.V_CTX = 8  # number of context vectors
@@ -127,7 +128,7 @@ def main(args):
     net, preprocess = set_model_clip(cfg)
     net.eval()
     net.float()
-    
+
     if cfg.SEED >= 0:
         print("Setting fixed seed: {}".format(cfg.SEED))
         set_random_seed(cfg.SEED)
@@ -148,10 +149,9 @@ def main(args):
         out_datasets = ['imagenet10']
     else:
         raise NotImplementedError('dataset not implement yet')
-    
+
     trainer = build_trainer(cfg)
     trainer.model.training = False
-
 
     # TODO
     # id_acc = trainer.test(id_data_loader)[0]
@@ -165,9 +165,10 @@ def main(args):
     auroc_list_slcm, aupr_list_slcm, fpr_list_slcm = [], [], []
 
     if cfg.DATASET.SUBSAMPLE_CLASSES != "all":
-        in_score_mcm, in_score_gl_mcm, in_score_r_mcm, in_score_slcm = trainer.test_ood_imagenet(trainer.test_loader, args.top_k, args.T)
+        in_score_mcm, in_score_gl_mcm, in_score_r_mcm, in_score_slcm = trainer.test_ood_imagenet(trainer.test_loader,
+                                                                                                 args.top_k, args.T)
 
-        print(f"Evaluting fine-grained OOD dataset Imagenet")
+        print(f"Evaluating fine-grained OOD dataset Imagenet")
         out_score_mcm, out_score_gl_mcm, out_score_r_mcm, out_score_slcm = trainer.test_ood_imagenet(trainer.val_loader,
                                                                                                      args.top_k, args.T)
         print("MCM score")
@@ -182,47 +183,48 @@ def main(args):
         get_and_print_results(args, in_score_r_mcm, out_score_r_mcm,
                               auroc_list_r_mcm, aupr_list_r_mcm, fpr_list_r_mcm)
 
-        print("SLCM score")
+        print("S-MCM score")
         get_and_print_results(args, in_score_slcm, out_score_slcm,
                               auroc_list_slcm, aupr_list_slcm, fpr_list_slcm)
     else:
         id_data_loader = set_val_loader(args, preprocess)
-        in_score_mcm, in_score_gl_mcm, in_score_r_mcm, in_score_slcm = trainer.test_ood(id_data_loader, args.top_k, args.T)
+        in_score_mcm, in_score_gl_mcm, in_score_r_mcm, in_score_slcm = trainer.test_ood(id_data_loader, args.top_k,
+                                                                                        args.T)
 
     for out_dataset in out_datasets:
-
-        print(f"Evaluting OOD dataset {out_dataset}")
+        print(f"Evaluating OOD dataset {out_dataset}")
         ood_loader = set_ood_loader_ImageNet(args, out_dataset, preprocess)
 
-        out_score_mcm, out_score_gl_mcm, out_score_r_mcm, out_score_slcm = trainer.test_ood(ood_loader, args.top_k, args.T)
+        out_score_mcm, out_score_gl_mcm, out_score_r_mcm, out_score_slcm = trainer.test_ood(ood_loader, args.top_k,
+                                                                                            args.T)
         print("MCM score")
         get_and_print_results(args, in_score_mcm, out_score_mcm,
-                            auroc_list_mcm, aupr_list_mcm, fpr_list_mcm)
+                              auroc_list_mcm, aupr_list_mcm, fpr_list_mcm)
         #
         print("GL-MCM score")
         get_and_print_results(args, in_score_gl_mcm, out_score_gl_mcm,
-                            auroc_list_gl_mcm, aupr_list_gl_mcm, fpr_list_gl_mcm)
+                              auroc_list_gl_mcm, aupr_list_gl_mcm, fpr_list_gl_mcm)
 
         print("R-MCM score")
         get_and_print_results(args, in_score_r_mcm, out_score_r_mcm,
                               auroc_list_r_mcm, aupr_list_r_mcm, fpr_list_r_mcm)
 
-        print("SLCM score")
+        print("S-MCM score")
         get_and_print_results(args, in_score_slcm, out_score_slcm,
                               auroc_list_slcm, aupr_list_slcm, fpr_list_slcm)
-
 
         #
         # plot_distribution(args, in_score_mcm, out_score_mcm, out_dataset, score='MCM')
         # plot_distribution(args, in_score_localprompt, out_score_localprompt, out_dataset, score='Local-Prompt')
 
-    print("MCM avg. FPR:{}, AUROC:{}, AUPR:{}".format(np.mean(fpr_list_mcm), np.mean(auroc_list_mcm), np.mean(aupr_list_mcm)))
-    print("GL-MCM avg. FPR:{}, AUROC:{}, AUPR:{}".format(np.mean(fpr_list_gl_mcm), np.mean(auroc_list_gl_mcm), np.mean(aupr_list_gl_mcm)))
+    print("MCM avg. FPR:{}, AUROC:{}, AUPR:{}".format(np.mean(fpr_list_mcm), np.mean(auroc_list_mcm),
+                                                      np.mean(aupr_list_mcm)))
+    print("GL-MCM avg. FPR:{}, AUROC:{}, AUPR:{}".format(np.mean(fpr_list_gl_mcm), np.mean(auroc_list_gl_mcm),
+                                                         np.mean(aupr_list_gl_mcm)))
     print("R-MCM avg. FPR:{}, AUROC:{}, AUPR:{}".format(np.mean(fpr_list_r_mcm), np.mean(auroc_list_r_mcm),
-                                                      np.mean(aupr_list_r_mcm)))
-    print("SLCM avg. FPR:{}, AUROC:{}, AUPR:{}".format(np.mean(fpr_list_slcm), np.mean(auroc_list_slcm),
-                                                               np.mean(aupr_list_slcm)))
-
+                                                        np.mean(aupr_list_r_mcm)))
+    print("S-MCM avg. FPR:{}, AUROC:{}, AUPR:{}".format(np.mean(fpr_list_slcm), np.mean(auroc_list_slcm),
+                                                        np.mean(aupr_list_slcm)))
 
     return
 

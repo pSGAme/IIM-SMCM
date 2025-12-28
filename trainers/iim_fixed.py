@@ -148,6 +148,7 @@ class PromptLearner(nn.Module):
 
         self.neg_tokenized_prompts = neg_tokenized_prompts
 
+
     def forward(self):
         assert self.class_token_position == 'end', 'not expected class token position.'
 
@@ -327,6 +328,7 @@ class IIM(TrainerX):
         if device_count > 1:
             print(f"Multiple GPUs detected (n_gpus={device_count}), use all of them!")
             self.model = nn.DataParallel(self.model)
+
 
     def calculate_loss_local(self, output_local, neg_output_local, label):
 
@@ -524,7 +526,9 @@ class IIM(TrainerX):
         mcm_score = []
         gl_mcm_score = []
         r_mcm_score = []
-        s_mcm_score = []
+        slcm_score = []
+        r_mcm_score_neg = []
+        slcm_score_neg = []
 
         for batch_idx, (images, labels, *id_flag) in enumerate(tqdm(data_loader)):
             images = images.cuda()
@@ -546,18 +550,31 @@ class IIM(TrainerX):
             r_mcm_local_score = R_MCM_Score(output, output_local, T, topk=top_k)
             r_mcm_score.append(r_mcm_local_score)
 
+            # r_mcm_neg
+            r_mcm_local_score_neg = R_MCM_Score(output, output_local, T, topk=top_k, neg_output_local=neg_output_local)
+            r_mcm_score_neg.append(r_mcm_local_score_neg)
+
             # s-mcm
             alpha = self.cfg.alpha
             lamda = alpha * 196 / (
-                self.model.prompt_learner.num_local_prompts)
+                        self.model.prompt_learner.num_local_prompts)
+            #
+            # + self.model.prompt_learner.num_neg_prompts
+            # lamda = 1.0
+            slcm_local_score = SLCM_Score(output, output_local, T, lamda, topk=top_k)
+            slcm_score.append(slcm_local_score)
 
-            s_mcm_local_score = S_MCM_Score(output, output_local, T, lamda, topk=top_k)
-            s_mcm_score.append(s_mcm_local_score)
+            # slcm_neg
+            slcm_local_score_neg = SLCM_Score(output, output_local, T, lamda, topk=top_k,
+                                              neg_output_local=neg_output_local)
+            slcm_score_neg.append(slcm_local_score_neg)
 
         return concat(mcm_score)[:len(data_loader.dataset)].copy(), \
                concat(gl_mcm_score)[:len(data_loader.dataset)].copy(), \
                concat(r_mcm_score)[:len(data_loader.dataset)].copy(), \
-               concat(s_mcm_score)[:len(data_loader.dataset)].copy()
+               concat(r_mcm_score_neg)[:len(data_loader.dataset)].copy(), \
+               concat(slcm_score)[:len(data_loader.dataset)].copy(), \
+               concat(slcm_score_neg)[:len(data_loader.dataset)].copy()
 
     @torch.no_grad()
     def test_ood_imagenet(self, data_loader, top_k, T):
@@ -572,7 +589,9 @@ class IIM(TrainerX):
         mcm_score = []
         gl_mcm_score = []
         r_mcm_score = []
-        s_mcm_score = []
+        slcm_score = []
+        r_mcm_score_neg = []
+        slcm_score_neg = []
 
         for batch_idx, batch in enumerate(tqdm(data_loader)):
             images, labels = self.parse_batch_test(batch)
@@ -594,18 +613,29 @@ class IIM(TrainerX):
             r_mcm_local_score = R_MCM_Score(output, output_local, T, topk=top_k)
             r_mcm_score.append(r_mcm_local_score)
 
-            # s_mcm
+            # r_mcm_neg
+            r_mcm_local_score_neg = R_MCM_Score(output, output_local, T, topk=top_k, neg_output_local=neg_output_local)
+            r_mcm_score_neg.append(r_mcm_local_score_neg)
+
+            # slcm
             alpha = self.cfg.alpha
             lamda = alpha * 196 / (
-                self.model.prompt_learner.num_local_prompts)
+                        self.model.prompt_learner.num_local_prompts)
+            # lamda = 1.0
+            slcm_local_score = SLCM_Score(output, output_local, T, lamda, topk=top_k)
+            slcm_score.append(slcm_local_score)
 
-            s_mcm_local_score = S_MCM_Score(output, output_local, T, lamda, topk=top_k)
-            s_mcm_score.append(s_mcm_local_score)
+            # slcm_neg
+            slcm_local_score_neg = SLCM_Score(output, output_local, T, lamda, topk=top_k,
+                                              neg_output_local=neg_output_local)
+            slcm_score_neg.append(slcm_local_score_neg)
 
         return concat(mcm_score)[:len(data_loader.dataset)].copy(), \
                concat(gl_mcm_score)[:len(data_loader.dataset)].copy(), \
                concat(r_mcm_score)[:len(data_loader.dataset)].copy(), \
-               concat(s_mcm_score)[:len(data_loader.dataset)].copy()
+               concat(r_mcm_score_neg)[:len(data_loader.dataset)].copy(), \
+               concat(slcm_score)[:len(data_loader.dataset)].copy(), \
+               concat(slcm_score_neg)[:len(data_loader.dataset)].copy()
 
     @torch.no_grad()
     def test_visualize(self, image_path, label):
@@ -639,5 +669,6 @@ class IIM(TrainerX):
         return pos_index, neg_index
 
     def Info(self):
-        names = ["MCM score", "GL-MCM score", "R-MCM score", "S-MCM score"]
+        names = ["MCM score", "GL-MCM score", "R-MCM score", "R-MCM score with neg", "SLCM score",
+                 "SLCM score with neg"]
         return names

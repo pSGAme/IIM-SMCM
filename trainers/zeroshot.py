@@ -283,7 +283,11 @@ class ZeroShot(TrainerX):
             S1 = torch.sum(torch.exp(output_local_t / T), dim=-1, keepdim=True)
             smax_local_t = torch.topk((torch.exp(output_local_t / T) / S1).reshape(-1, N * C), k=top_k, dim=-1)[0]
             mcm_local_score_t = -to_np(torch.mean(smax_local_t, dim=1))
-            s_mcm_score.append(mcm_global_score + 1.0 * gl_mcm_local_score + 1.0 * mcm_local_score_t)
+            alpha = self.cfg.alpha
+            lamda = alpha * 196 / (
+                self.model.prompt_learner.num_local_prompts)
+
+            s_mcm_score.append(mcm_global_score + 1.0 * gl_mcm_local_score + lamda * mcm_local_score_t)
 
         return concat(mcm_score)[:len(data_loader.dataset)].copy(), \
                concat(gl_mcm_score)[:len(data_loader.dataset)].copy(), \
@@ -336,7 +340,12 @@ class ZeroShot(TrainerX):
             S1 = torch.sum(torch.exp(output_local_t / T), dim=-1, keepdim=True)
             smax_local_t = torch.topk((torch.exp(output_local_t / T) / S1).reshape(-1, N * C), k=top_k, dim=-1)[0]
             mcm_local_score_t = -to_np(torch.mean(smax_local_t, dim=1))
-            s_mcm_score.append(mcm_global_score + 1.0 * gl_mcm_local_score + 1.0 * mcm_local_score_t)
+
+            alpha = self.cfg.alpha
+            lamda = alpha * 196 / (
+                self.model.prompt_learner.num_local_prompts)
+
+            s_mcm_score.append(mcm_global_score + 1.0 * gl_mcm_local_score + lamda * mcm_local_score_t)
 
         return concat(mcm_score)[:len(data_loader.dataset)].copy(), \
                concat(gl_mcm_score)[:len(data_loader.dataset)].copy(), \
