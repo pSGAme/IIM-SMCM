@@ -212,7 +212,7 @@ if __name__ == "__main__":
         nargs=argparse.REMAINDER,
         help="modify config options using the command-line",
     )
-    # augment for LOCALPROMPT
+
     parser.add_argument('--num_neg_prompts', type=int, default=300,
                         help='number of negative local prompts')
     parser.add_argument('--num_pos', type=int, default=5,
